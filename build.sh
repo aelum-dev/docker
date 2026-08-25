@@ -41,6 +41,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
     useradd -m -s /bin/bash makepkg 2>/dev/null || true
     echo 'makepkg ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/makepkg
 
+    rm -rf /home/makepkg/aurbuild
     mkdir -p /home/makepkg/aurbuild
     chown -R makepkg:makepkg /home/makepkg/aurbuild
     cd /home/makepkg/aurbuild
