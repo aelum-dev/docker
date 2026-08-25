@@ -21,7 +21,4 @@ mkdir -p "$BLANK_DB/sync"
 echo "Syncing and downloading packages with dependencies..."
 pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir /var/cache/pacman/pkg "${PACKAGES[@]}"
 
-# Cleanup
-rm -rf "$BLANK_DB"
-
 echo "Downloaded packages: $(ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l)"
