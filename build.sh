@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install essential build packages (git, base-devel, archiso)
+# Install essential build packages (git, base-devel, archiso, nodejs, go)
 
 echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base-devel archiso
+pacman -Sy --noconfirm git base-devel archiso nodejs go
 
 # Clone live-iso profile
 
@@ -62,6 +62,9 @@ if [ ! -d "$INSTALLER_DIR/.git" ]; then
     echo "Cloning installer..."
     git clone https://gitlab.com/aestheticos/installer.git "$INSTALLER_DIR"
 fi
+
+echo "Installing wails..."
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
 echo "Building installer..."
 cd "$INSTALLER_DIR"
