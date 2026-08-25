@@ -10,18 +10,23 @@ pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2
 
 # Clone live-iso profile
 
-LIVE_ISO_DIR="${SCRIPT_DIR}/.cache/live-iso"
-rm -rf "$LIVE_ISO_DIR"
+LIVE_ISO_DIR="/app/live-iso"
+TMP_ISO="/tmp/live-iso-clone"
+rm -rf "$TMP_ISO"
 echo "Cloning live-iso profile..."
-git clone https://gitlab.com/aestheticos/live-iso.git "$LIVE_ISO_DIR"
+git clone --depth 1 https://gitlab.com/aestheticos/live-iso.git "$TMP_ISO"
+cp -a "$TMP_ISO"/* "$TMP_ISO"/.[!.]* "$TMP_ISO"/..?* "$LIVE_ISO_DIR/" 2>/dev/null || true
+rm -rf "$TMP_ISO"
 
 # Clone and build installer
 
-INSTALLER_DIR="${SCRIPT_DIR}/.cache/installer"
-if [ ! -d "$INSTALLER_DIR/.git" ]; then
-    echo "Cloning installer..."
-    git clone https://gitlab.com/aestheticos/installer.git "$INSTALLER_DIR"
-fi
+INSTALLER_DIR="/app/installer"
+TMP_INSTALLER="/tmp/installer-clone"
+rm -rf "$TMP_INSTALLER"
+echo "Cloning installer..."
+git clone --depth 1 https://gitlab.com/aestheticos/installer.git "$TMP_INSTALLER"
+cp -a "$TMP_INSTALLER"/* "$TMP_INSTALLER"/.[!.]* "$TMP_INSTALLER"/..?* "$INSTALLER_DIR/" 2>/dev/null || true
+rm -rf "$TMP_INSTALLER"
 
 export PATH="$HOME/go/bin:$PATH"
 
