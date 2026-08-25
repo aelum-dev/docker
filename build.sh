@@ -10,7 +10,7 @@ pacman -Sy --noconfirm git base-devel archiso
 
 # Clone live-iso profile
 
-LIVE_ISO_DIR="${SCRIPT_DIR}/live-iso"
+LIVE_ISO_DIR="${SCRIPT_DIR}/.cache/live-iso"
 if [ ! -d "$LIVE_ISO_DIR/.git" ]; then
     echo "Cloning live-iso profile..."
     git clone https://gitlab.com/aestheticos/live-iso.git "$LIVE_ISO_DIR"
