@@ -17,7 +17,6 @@ services:
     container_name: arch-shell
     tty: true
     stdin_open: true
-    restart: "no"
     entrypoint: ["/bin/bash"]
     volumes:
       - ./build.sh:/app/build.sh:ro
