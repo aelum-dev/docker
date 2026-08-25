@@ -57,7 +57,7 @@ fi
 
 # Clone and build installer
 
-INSTALLER_DIR="${SCRIPT_DIR}/installer"
+INSTALLER_DIR="${SCRIPT_DIR}/.cache/installer"
 if [ ! -d "$INSTALLER_DIR/.git" ]; then
     echo "Cloning installer..."
     git clone https://gitlab.com/aestheticos/installer.git "$INSTALLER_DIR"
