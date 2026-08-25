@@ -9,5 +9,3 @@ services:
     entrypoint: ["/bin/bash", "/app/build.sh"]
     volumes:
       - ./build.sh:/app/build.sh:ro
-      - ./packages.x86_64:/app/packages.x86_64:ro
-      - ./packages.aur.x86_64:/app/packages.aur.x86_64:ro
