@@ -55,6 +55,24 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
     echo "AUR packages are built and installed."
 fi
 
+# Clone and build installer
+
+INSTALLER_DIR="${SCRIPT_DIR}/installer"
+if [ ! -d "$INSTALLER_DIR/.git" ]; then
+    echo "Cloning installer..."
+    git clone https://gitlab.com/aestheticos/installer.git "$INSTALLER_DIR"
+fi
+
+echo "Building installer..."
+cd "$INSTALLER_DIR"
+make build
+
+echo "Copying installer binaries..."
+mkdir -p "${LIVE_ISO_DIR}/airootfs/usr/local/bin"
+cp "$INSTALLER_DIR/build/bin/aestheticos-installer" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
+cp "$INSTALLER_DIR/build/bin/aestheticos-installer-cli" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
+echo "Installer binaries copied."
+
 # Copy all packages to live-iso offline mirror
 
 MIRROR_DIR="${LIVE_ISO_DIR}/airootfs/var/cache/aestheticos/offline-mirror"
