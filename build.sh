@@ -24,6 +24,8 @@ if [ ! -d "$INSTALLER_DIR/.git" ]; then
     git clone https://gitlab.com/aestheticos/installer.git "$INSTALLER_DIR"
 fi
 
+export PATH="$HOME/go/bin:$PATH"
+
 echo "Building installer..."
 cd "$INSTALLER_DIR"
 make build
