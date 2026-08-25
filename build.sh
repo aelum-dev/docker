@@ -96,7 +96,7 @@ echo "Database: $REPO_DB"
 
 echo "Building ISO..."
 cd "$LIVE_ISO_DIR"
-mkarchiso -v -w work -o output -C pacman-offline.conf -m iso
+mkarchiso -v -w work -o output -C pacman-offline.conf -m iso .
 
 echo ""
 echo "=== ISO build complete ==="
