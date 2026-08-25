@@ -3,11 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install essential build packages (git, base, base-devel)
+# Install essential build packages (git, base-devel)
 
 echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base base-devel
-echo "Done."
+pacman -Sy --noconfirm git base-devel
 
 # Clone live-iso profile
 
@@ -52,7 +51,6 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         chown -R makepkg:makepkg "$pkg"
         cd "$pkg"
         sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -si --noconfirm --skipinteg || true
-        cd ..
     done
     echo "AUR packages built and installed."
 fi
