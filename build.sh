@@ -23,4 +23,4 @@ pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir /var/cache/pacman/pkg "$
 rm -rf "$BLANK_DB"
 
 echo "Downloaded packages:"
-ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | xargs -n1 basename | sort
+ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l
