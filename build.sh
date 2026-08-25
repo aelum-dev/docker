@@ -52,7 +52,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         cd "$pkg"
         sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -si --noconfirm --skipinteg || true
     done
-    echo "AUR packages are built."
+    echo "AUR packages are built and installed."
 fi
 
 # Copy all packages to live-iso offline mirror
