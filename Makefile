@@ -11,4 +11,4 @@ stop:
 	docker compose stop arch-shell
 
 attach:
-	docker exec -it arch bash
+	docker exec -it arch-shell bash
