@@ -1,0 +1,12 @@
+services:
+  arch:
+    image: archlinux:latest
+    privileged: true
+    container_name: arch
+    tty: true
+    stdin_open: true
+    restart: "no"
+    entrypoint: ["/bin/bash", "/app/build.sh"]
+    volumes:
+      - ./build.sh:/app/build.sh:ro
+      - ./packages.x86_64:/app/packages.x86_64:ro
