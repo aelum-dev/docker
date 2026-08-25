@@ -47,10 +47,10 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
 
     for pkg in "${AUR_PACKAGES[@]}"; do
         echo "Building $pkg..."
-        git clone --depth 1 "https://aur.archlinux.org/$pkg.git"
+        git clone --depth 5 "https://aur.archlinux.org/$pkg.git"
         chown -R makepkg:makepkg "$pkg"
         cd "$pkg"
-        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild GIT_CLONE_ARGS="--depth 1" makepkg -si --noconfirm --skipinteg || true
+        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild GIT_CLONE_ARGS="--depth 5 --tags" makepkg -si --noconfirm --skipinteg || true
         cd ..
     done
     echo "AUR packages are built and installed."
