@@ -9,3 +9,4 @@ services:
     entrypoint: ["/bin/bash", "/app/build.sh"]
     volumes:
       - ./build.sh:/app/build.sh:ro
+      - ./output:/app/live-iso/output
