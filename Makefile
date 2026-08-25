@@ -3,7 +3,7 @@
 build:
 	docker compose run --rm arch
 
-shell:
+run:
 	docker compose up -d arch-shell
 	docker exec -it arch-shell bash
 
