@@ -23,6 +23,7 @@ rm -rf "$TMP_ISO"
 INSTALLER_DIR="/app/installer"
 TMP_INSTALLER="/tmp/installer-clone"
 rm -rf "$TMP_INSTALLER"
+mkdir -p "$INSTALLER_DIR"
 echo "Cloning installer..."
 git clone --depth 1 https://gitlab.com/aestheticos/installer.git "$TMP_INSTALLER"
 cp -a "$TMP_INSTALLER"/* "$TMP_INSTALLER"/.[!.]* "$TMP_INSTALLER"/..?* "$INSTALLER_DIR/" 2>/dev/null || true
