@@ -7,17 +7,20 @@ PACKAGES_FILE="${SCRIPT_DIR}/packages.x86_64"
 # Read packages from file (skip empty lines and comments)
 mapfile -t PACKAGES < <(grep -v '^\s*$' "$PACKAGES_FILE" | grep -v '^\s*#')
 
-echo "Packages to install:"
+echo "Packages to download:"
 printf '%s\n' "${PACKAGES[@]}"
 echo ""
 
-# Sync pacman and download packages with all dependencies
-echo "Syncing pacman database..."
-pacman -Sy --noconfirm
+# Create blank dbpath so pacman resolves all deps fresh (no installed pkgs)
+BLANK_DB=/tmp/blankdb-pacman
+rm -rf "$BLANK_DB"
+mkdir -p "$BLANK_DB/sync"
 
-echo "Downloading packages and dependencies..."
-pacman -S --noconfirm --downloadonly "${PACKAGES[@]}"
+echo "Syncing and downloading packages with dependencies..."
+pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir /var/cache/pacman/pkg "${PACKAGES[@]}"
 
-echo ""
+# Cleanup
+rm -rf "$BLANK_DB"
+
 echo "Downloaded packages:"
-ls /var/cache/pacman/pkg/ | grep -E "^(${PACKAGES[*]// /|})" || true
+ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | xargs -n1 basename | sort
