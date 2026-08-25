@@ -50,7 +50,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         git clone --depth 5 "https://aur.archlinux.org/$pkg.git"
         chown -R makepkg:makepkg "$pkg"
         cd "$pkg"
-        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild GIT_CLONE_ARGS="--depth 5 --tags" makepkg -si --noconfirm --skipinteg || true
+        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -si --noconfirm --skipinteg || true
         cd ..
     done
     echo "AUR packages are built and installed."
