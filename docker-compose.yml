@@ -9,7 +9,7 @@ services:
     entrypoint: ["/bin/bash", "/app/build.sh"]
     volumes:
       - ./build.sh:/app/build.sh:ro
-      - ./output:/app/live-iso/output
+      - ./output:/app/.cache/live-iso/output
 
   arch-shell:
     image: archlinux:latest
@@ -20,4 +20,4 @@ services:
     entrypoint: ["/bin/bash"]
     volumes:
       - ./build.sh:/app/build.sh:ro
-      - ./output:/app/live-iso/output
+      - ./output:/app/.cache/live-iso/output
