@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install essential build packages (git, base-devel)
+# Install essential build packages (git, base-devel, archiso)
 
 echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base-devel
+pacman -Sy --noconfirm git base-devel archiso
 
 # Clone live-iso profile
 
@@ -87,3 +87,17 @@ echo ""
 echo "Mirror: $MIRROR_DIR"
 echo "Packages: $(ls "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 echo "Database: $REPO_DB"
+
+# Build ISO
+
+echo "Updating pacman-offline.conf for local repo..."
+sed -i "s|file:///project/airootfs/var/cache/aestheticos/offline-mirror|file://${LIVE_ISO_DIR}/airootfs/var/cache/aestheticos/offline-mirror|" "${LIVE_ISO_DIR}/pacman-offline.conf"
+
+echo "Building ISO..."
+cd "$LIVE_ISO_DIR"
+mkarchiso -v -w work -o output -C pacman-offline.conf -m iso
+
+echo ""
+echo "=== ISO build complete ==="
+echo "Output: $LIVE_ISO_DIR/output/"
+ls -lh "$LIVE_ISO_DIR/output/"*.iso 2>/dev/null || echo "No ISO found"
