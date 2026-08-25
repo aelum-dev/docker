@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install essential build packages (git, base-devel, archiso, go, nodejs-lts-jod)
+# Install essential build packages (git, base-devel, archiso...)
 
 echo "Installing essential build packages..."
 pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3 grub
@@ -84,7 +84,7 @@ mkdir -p "$MIRROR_DIR"
 
 cp /var/cache/pacman/pkg/*.pkg.tar.zst "$MIRROR_DIR/"
 
-REPO_DB="$MIRROR_DIR/aestheticos-offline.db"
+REPO_DB="$MIRROR_DIR/aestheticos-offline.db.tar.zst"
 repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null || true
 
 echo ""
