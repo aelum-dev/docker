@@ -1,4 +1,4 @@
-.PHONY: build shell stop
+.PHONY: build shell stop attach
 
 build:
 	docker compose run --rm arch
@@ -9,3 +9,6 @@ run:
 
 stop:
 	docker compose stop arch-shell
+
+attach:
+	docker exec -it arch bash
