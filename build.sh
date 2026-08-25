@@ -52,7 +52,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         cd "$pkg"
         sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -si --noconfirm --skipinteg || true
     done
-    echo "AUR packages built and installed."
+    echo "AUR packages are built."
 fi
 
 # Copy all packages to live-iso offline mirror
@@ -62,11 +62,10 @@ mkdir -p "$MIRROR_DIR"
 
 cp /var/cache/pacman/pkg/*.pkg.tar.zst "$MIRROR_DIR/"
 
-REPO_DB="$MIRROR_DIR/aestheticos.db"
+REPO_DB="$MIRROR_DIR/aestheticos-offline.db"
 repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null || true
 
 echo ""
-echo "=== Done ==="
 echo "Mirror: $MIRROR_DIR"
 echo "Packages: $(ls "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 echo "Database: $REPO_DB"
