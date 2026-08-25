@@ -5,7 +5,7 @@ build:
 
 run:
 	docker compose up -d arch-shell
-	docker exec -it arch-shell bash
+	docker exec -it arch-shell bash || true
 
 stop:
 	docker compose stop arch-shell
