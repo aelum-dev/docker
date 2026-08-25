@@ -90,9 +90,6 @@ echo "Database: $REPO_DB"
 
 # Build ISO
 
-echo "Updating pacman-offline.conf for local repo..."
-sed -i "s|file:///project/airootfs/var/cache/aestheticos/offline-mirror|file://${LIVE_ISO_DIR}/airootfs/var/cache/aestheticos/offline-mirror|" "${LIVE_ISO_DIR}/pacman-offline.conf"
-
 echo "Building ISO..."
 cd "$LIVE_ISO_DIR"
 mkarchiso -v -w work -o output -C pacman-offline.conf -m iso
