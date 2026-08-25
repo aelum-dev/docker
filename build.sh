@@ -22,5 +22,4 @@ pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir /var/cache/pacman/pkg "$
 # Cleanup
 rm -rf "$BLANK_DB"
 
-echo "Downloaded packages:"
-ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l
+echo "Downloaded packages: $(ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l)"
