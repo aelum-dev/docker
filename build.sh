@@ -61,3 +61,20 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
 else
     echo "No AUR packages to download."
 fi
+
+# Step 3: Create local repository database from cached packages
+
+echo "Creating local repository database..."
+REPO_DIR="${SCRIPT_DIR}/repo"
+mkdir -p "$REPO_DIR"
+
+# Copy all .pkg.tar.zst files to repo directory
+cp /var/cache/pacman/pkg/*.pkg.tar.zst "$REPO_DIR/"
+
+# Create the database using repo-add
+REPO_DB="$REPO_DIR/aestheticos.db"
+repo-add "$REPO_DB" "$REPO_DIR"/*.pkg.tar.zst 2>/dev/null || true
+
+echo "Local repository created at $REPO_DIR"
+echo "Repository contains: $(ls "$REPO_DIR"/*.pkg.tar.zst 2>/dev/null | wc -l) packages"
+echo "Database: $REPO_DB"
