@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Install essential build packages (git, base-devel, archiso, go, nodejs-lts-jod)
 
 echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3
+pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3 grub
 
 # Clone live-iso profile
 
