@@ -100,7 +100,7 @@ cp "$OFFLINE_CACHE"/*.pkg.tar.zst "$MIRROR_DIR/"
 cp /home/makepkg/pkg/*.pkg.tar.zst "$MIRROR_DIR/" 2>/dev/null || true
 
 REPO_DB="$MIRROR_DIR/aestheticos-offline.db.tar.zst"
-repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null || true
+repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst &>/dev/null || true
 
 echo ""
 echo "Mirror: $MIRROR_DIR"
