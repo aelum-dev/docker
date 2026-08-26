@@ -69,6 +69,13 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
     rm -rf /home/makepkg/aurbuild
     mkdir -p /home/makepkg/aurbuild
     chown -R makepkg:makepkg /home/makepkg/aurbuild
+
+    # Configure makepkg to save built packages to a writable dir for offline mirror
+    sed -i 's|^#*PKGDEST=.*|PKGDEST=/home/makepkg/pkg|' /etc/makepkg.conf
+    sed -i 's|^#*SRCDEST=.*|SRCDEST=/home/makepkg/src|' /etc/makepkg.conf
+    mkdir -p /home/makepkg/pkg
+    chown makepkg:makepkg /home/makepkg/pkg
+
     cd /home/makepkg/aurbuild
 
     for pkg in "${AUR_PACKAGES[@]}"; do
@@ -76,7 +83,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         git clone "https://aur.archlinux.org/$pkg.git"
         chown -R makepkg:makepkg "$pkg"
         cd "$pkg"
-        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -si --noconfirm --skipinteg || true
+        sudo -u makepkg env BUILDDIR=/home/makepkg/aurbuild makepkg -s --noconfirm --skipinteg || true
         cd ..
     done
     echo "AUR packages are built and installed."
@@ -88,6 +95,7 @@ MIRROR_DIR="${LIVE_ISO_DIR}/airootfs/var/cache/aestheticos/offline-mirror"
 mkdir -p "$MIRROR_DIR"
 
 cp /var/cache/pacman/pkg/*.pkg.tar.zst "$MIRROR_DIR/"
+cp /home/makepkg/pkg/*.pkg.tar.zst "$MIRROR_DIR/" 2>/dev/null || true
 
 REPO_DB="$MIRROR_DIR/aestheticos-offline.db.tar.zst"
 repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null || true
