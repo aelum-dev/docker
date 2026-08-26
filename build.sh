@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Install essential build packages (git, base-devel, archiso...)
 
 echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3 grub
+pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3 grub memtest86+
 
 # Clone live-iso profile
 
@@ -106,6 +106,9 @@ echo ""
 echo "Mirror: $MIRROR_DIR"
 echo "Packages: $(ls "$MIRROR_DIR"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 echo "Database: $REPO_DB"
+
+# Clean work directory before build
+rm -rf "${LIVE_ISO_DIR}/work"
 
 # Build ISO
 
