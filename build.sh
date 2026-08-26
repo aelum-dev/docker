@@ -89,6 +89,49 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         cd ..
     done
     echo "AUR packages are downloaded and built."
+
+    # makepkg -s installed each AUR package's dependencies into the live system,
+    # not into $OFFLINE_CACHE. Re-download each built package plus its dependency
+    # tree into the offline cache so they are available in the ISO.
+    shopt -s nullglob
+    aur_built=(/home/makepkg/pkg/*.pkg.tar.zst)
+    shopt -u nullglob
+
+    if [ ${#aur_built[@]} -gt 0 ]; then
+        echo "Downloading AUR packages and their dependencies into offline cache (download-only)..."
+
+        # Expose the built AUR packages as a local repo so pacman can resolve
+        # each package by name and pull its runtime dependencies from the
+        # official mirrors. Include = /etc/pacman.conf keeps the real mirrors.
+        repo-add /home/makepkg/pkg/aur-local.db.tar.zst /home/makepkg/pkg/*.pkg.tar.zst 2>/dev/null
+        # file:// repos don't transparently serve the compressed db, so pacman's
+        # request for 'aur-local.db' would miss. Symlink it to the real .tar.zst.
+        ln -sf aur-local.db.tar.zst /home/makepkg/pkg/aur-local.db
+        cat > /tmp/offline-pacman.conf <<'EOF'
+            Include = /etc/pacman.conf
+
+            [aur-local]
+            Server = file:///home/makepkg/pkg
+            # Built AUR packages have no .sig files; scope signature-skipping to this repo
+            # only, so the official mirrors still enforce their SigLevel.
+            SigLevel = Never
+        EOF
+
+        # Read each package's name from its file (reliable regardless of messy
+        # version strings), then download it together with its dependency tree
+        # into --cachedir. -w keeps this download-only: nothing is extracted
+        # into the container, matching the original -Syw intent.
+        mapfile -t aur_names < <(
+            for f in "${aur_built[@]}"; do
+                # pacman -Qp prints "<name> <version>" per package; take the name.
+                pacman -Qp "$f" | awk '{print $1}'
+            done
+        )
+        pacman -Syw --noconfirm --disable-sandbox \
+            --config /tmp/offline-pacman.conf \
+            --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" \
+            "${aur_names[@]}"
+    fi
 fi
 
 # Copy all packages to live-iso offline mirror
