@@ -158,6 +158,14 @@ echo "Building ISO..."
 cd "$LIVE_ISO_DIR"
 mkarchiso -v -w work -o output -C pacman-offline.conf -m iso .
 
+# The build runs as root, so files written into the mounted output dir would
+# otherwise be root-owned on the host. Hand them back to the host user (passed
+# in via docker-compose environment, defaulting to a standard non-root id).
+OUT_UID="${OUTPUT_UID:-1000}"
+OUT_GID="${OUTPUT_GID:-1000}"
+chown -R "${OUT_UID}:${OUT_GID}" "$LIVE_ISO_DIR/output"
+echo "Output owned by ${OUT_UID}:${OUT_GID}"
+
 echo ""
 echo "=== ISO build complete ==="
 echo "Output: $LIVE_ISO_DIR/output/"

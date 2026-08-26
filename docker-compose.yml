@@ -7,6 +7,10 @@ services:
     stdin_open: true
     restart: "no"
     entrypoint: ["/bin/bash", "/app/build.sh"]
+    environment:
+      # Host user id, so build.sh can hand the ISO back to a non-root owner
+      - OUTPUT_UID=${UID:-1000}
+      - OUTPUT_GID=${GID:-1000}
     volumes:
       - ./build.sh:/app/build.sh:ro
       - ./output:/app/live-iso/output
