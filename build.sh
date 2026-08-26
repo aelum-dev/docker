@@ -103,10 +103,9 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         # Expose the built AUR packages as a local repo so pacman can resolve
         # each package by name and pull its runtime dependencies from the
         # official mirrors. Include = /etc/pacman.conf keeps the real mirrors.
+        # repo-add creates aur-local.db.tar.zst plus an 'aur-local.db' symlink,
+        # which is what pacman's file:// retrieval requests.
         repo-add /home/makepkg/pkg/aur-local.db.tar.zst /home/makepkg/pkg/*.pkg.tar.zst 2>/dev/null
-        # file:// repos don't transparently serve the compressed db, so pacman's
-        # request for 'aur-local.db' would miss. Symlink it to the real .tar.zst.
-        ln -sf aur-local.db.tar.zst /home/makepkg/pkg/aur-local.db
         cat > /tmp/offline-pacman.conf <<'EOF'
             Include = /etc/pacman.conf
 
