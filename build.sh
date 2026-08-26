@@ -114,7 +114,7 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
             # Built AUR packages have no .sig files; scope signature-skipping to this repo
             # only, so the official mirrors still enforce their SigLevel.
             SigLevel = Never
-        EOF
+EOF
 
         # Read each package's name from its file (reliable regardless of messy
         # version strings), then download it together with its dependency tree
