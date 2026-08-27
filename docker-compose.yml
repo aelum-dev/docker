@@ -1,8 +1,11 @@
 services:
-  arch:
-    image: archlinux:latest
+  aestheticos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aestheticos-image
     privileged: true
-    container_name: arch
+    container_name: aestheticos
     tty: true
     stdin_open: true
     restart: "no"
@@ -15,10 +18,13 @@ services:
       - ./build.sh:/app/build.sh:ro
       - ./output:/app/live-iso/output
 
-  arch-shell:
-    image: archlinux:latest
+  aestheticos-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aestheticos-image
     privileged: true
-    container_name: arch-shell
+    container_name: aestheticos-shell
     tty: true
     stdin_open: true
     entrypoint: ["/bin/bash"]

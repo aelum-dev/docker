@@ -3,10 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Install essential build packages (git, base-devel, archiso...)
-
-echo "Installing essential build packages..."
-pacman -Sy --noconfirm git base-devel archiso go nodejs-lts-jod npm gtk3 webkit2gtk-4.1 libsoup3 grub memtest86+
+# Build toolchain (git, base-devel, archiso, go, nodejs, gtk3, webkit2gtk,
+# grub, memtest86+) is provided by the docker image. See ./Dockerfile.
 
 # Clone live-iso profile
 

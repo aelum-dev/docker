@@ -32,14 +32,39 @@ The built ISO is written to the mounted `output/` directory.
 make build
 ```
 
-This runs the pipeline in a one-shot container and writes the ISO to `output/`.
+The toolchain image (`aestheticos-image`) is built from `./Dockerfile` and
+cached, so the first `make build` includes the toolchain install while later
+builds skip it and only redo the clones, offline-cache download, and AUR builds.
+The pipeline then runs in a one-shot container and writes the ISO to `output/`.
 The output directory is bind-mounted from the host, and files are handed back to
 the host user automatically (via `OUTPUT_UID`/`OUTPUT_GID`, defaulting to `UID`/`GID`).
+
+### Build the toolchain image only
+
+To (re)build just the `aestheticos-image` image without running the ISO
+pipeline:
+
+```bash
+make image          # builds & tags aestheticos-image
+# or, forcing a fresh build ignoring cache:
+make image NO_CACHE=1   # see below
+```
+
+Equivalently with compose directly:
+
+```bash
+docker compose build aestheticos
+# or, forcing a fresh build ignoring cache:
+docker compose build --no-cache aestheticos
+```
+
+Rebuild with `--no-cache` whenever you change `./Dockerfile` or want to pick up
+updated packages in the `archlinux:latest` base.
 
 To debug or work interactively:
 
 ```bash
-make run        # start an interactive build container (arch-shell)
+make run        # start an interactive build container (aestheticos-shell)
 make attach     # attach to it later
 make stop       # stop the container
 make clean      # stop + remove containers and prune volumes
@@ -48,7 +73,7 @@ make clean      # stop + remove containers and prune volumes
 Or run the pipeline directly:
 
 ```bash
-docker compose run --rm arch
+docker compose run --rm aestheticos
 ```
 
 The resulting ISO appears in `output/`, e.g. `output/aestheticos-YYYY.MM.DD-x86_64.iso`.
@@ -75,8 +100,9 @@ Launches the latest ISO in `output/` in QEMU with:
 
 ```
 .
+├── Dockerfile               # Build toolchain image (archlinux + tooling)
 ├── build.sh                 # Full build pipeline (run inside the container)
-├── docker-compose.yml       # arch (build) + arch-shell (interactive) services
+├── docker-compose.yml       # aestheticos (build) + aestheticos-shell (interactive) services
 ├── Makefile                 # build / run / stop / attach / clean
 ├── run.sh                   # QEMU launch script
 ├── output/                  # Built ISO files (bind-mounted from host)
