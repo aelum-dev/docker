@@ -12,7 +12,7 @@ holds the content that goes into the ISO.
 `build.sh` runs the full pipeline inside a privileged `archlinux` container:
 
 1. Installs build tooling (`git`, `base-devel`, `archiso`, `grub`, etc.)
-2. Clones the [AestheticOS profile](https://gitlab.com/aestheticos/live-iso) and the [AestheticOS Installer](https://github.com/KornienkoDev/AestheticOS-Installer), and builds the installer binaries
+2. Clones the [AestheticOS profile](https://gitlab.com/aestheticos/live-iso) and the [AestheticOS Installer](https://gitlab.com/aestheticos/installer), and builds the installer binaries
 3. Downloads every official package needed (via a blank-db `pacman -Syw`, so only the dependency tree is pulled)
 4. Builds the listed AUR packages and pulls each one together with its dependency tree into the offline cache
 5. Assembles an offline mirror (`repo-add` + `file://` server) into the profile's `airootfs`
