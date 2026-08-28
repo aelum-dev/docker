@@ -13,7 +13,7 @@ TMP_ISO="/tmp/live-iso-clone"
 rm -rf "$TMP_ISO"
 mkdir -p "$LIVE_ISO_DIR"
 echo "Cloning live-iso profile..."
-git clone --depth 1 https://gitlab.com/aestheticos/live-iso.git "$TMP_ISO"
+git clone --depth 1 https://gitlab.com/aelum/live-iso.git "$TMP_ISO"
 cp -a "$TMP_ISO"/* "$TMP_ISO"/.[!.]* "$TMP_ISO"/..?* "$LIVE_ISO_DIR/" 2>/dev/null || true
 rm -rf "$TMP_ISO"
 
@@ -24,7 +24,7 @@ TMP_INSTALLER="/tmp/installer-clone"
 rm -rf "$TMP_INSTALLER"
 mkdir -p "$INSTALLER_DIR"
 echo "Cloning installer..."
-git clone --depth 1 https://gitlab.com/aestheticos/installer.git "$TMP_INSTALLER"
+git clone --depth 1 https://gitlab.com/aelum/installer.git "$TMP_INSTALLER"
 cp -a "$TMP_INSTALLER"/* "$TMP_INSTALLER"/.[!.]* "$TMP_INSTALLER"/..?* "$INSTALLER_DIR/" 2>/dev/null || true
 rm -rf "$TMP_INSTALLER"
 
@@ -36,8 +36,8 @@ make build
 
 echo "Copying installer binaries..."
 mkdir -p "${LIVE_ISO_DIR}/airootfs/usr/local/bin"
-cp "$INSTALLER_DIR/build/bin/aestheticos-installer" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
-cp "$INSTALLER_DIR/build/bin/aestheticos-installer-cli" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
+cp "$INSTALLER_DIR/build/bin/aelum-installer" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
+cp "$INSTALLER_DIR/build/bin/aelum-installer-cli" "${LIVE_ISO_DIR}/airootfs/usr/local/bin/"
 echo "Installer binaries copied."
 
 PACKAGES_FILE="${LIVE_ISO_DIR}/packages.x86_64"
@@ -133,13 +133,13 @@ fi
 
 # Copy all packages to live-iso offline mirror
 
-MIRROR_DIR="${LIVE_ISO_DIR}/airootfs/var/cache/aestheticos/offline-mirror"
+MIRROR_DIR="${LIVE_ISO_DIR}/airootfs/var/cache/aelum/offline-mirror"
 mkdir -p "$MIRROR_DIR"
 
 cp "$OFFLINE_CACHE"/*.pkg.tar.zst "$MIRROR_DIR/"
 cp /home/makepkg/pkg/*.pkg.tar.zst "$MIRROR_DIR/" 2>/dev/null || true
 
-REPO_DB="$MIRROR_DIR/aestheticos-offline.db.tar.zst"
+REPO_DB="$MIRROR_DIR/aelum-offline.db.tar.zst"
 repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst &>/dev/null || true
 
 echo ""

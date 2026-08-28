@@ -1,6 +1,6 @@
 FROM archlinux:latest
 
-# Static build toolchain for the AestheticOS ISO pipeline.
+# Static build toolchain for the Aelum ISO pipeline.
 # Installed once and cached by Docker across builds; only re-pulled when the
 # base tag updates or this layer is edited. Per-run work (clones, the offline
 # cache download, AUR builds) stays in build.sh, not here.

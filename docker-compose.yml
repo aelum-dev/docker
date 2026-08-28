@@ -1,11 +1,11 @@
 services:
-  aestheticos:
+  aelum:
     build:
       context: .
       dockerfile: Dockerfile
-    image: aestheticos-image
+    image: aelum-image
     privileged: true
-    container_name: aestheticos
+    container_name: aelum
     tty: true
     stdin_open: true
     restart: "no"
@@ -18,13 +18,13 @@ services:
       - ./build.sh:/app/build.sh:ro
       - ./output:/app/live-iso/output
 
-  aestheticos-shell:
+  aelum-shell:
     build:
       context: .
       dockerfile: Dockerfile
-    image: aestheticos-image
+    image: aelum-image
     privileged: true
-    container_name: aestheticos-shell
+    container_name: aelum-shell
     tty: true
     stdin_open: true
     entrypoint: ["/bin/bash"]
