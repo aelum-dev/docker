@@ -26,7 +26,7 @@ The built ISO is written to the mounted `output/` directory.
 
 - Docker + Docker Compose
 - KVM support (for QEMU testing)
-- ~25 GB of free disk space for the build (the 16G `vdisk.qcow2` and ~3.5 GB ISO are created under `output/` and `.`)
+- ~25 GB of free disk space for the build
 
 ## Build
 
