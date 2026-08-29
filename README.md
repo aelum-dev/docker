@@ -9,14 +9,16 @@ holds the content that goes into the ISO.
 
 ## What it does
 
-`build.sh` runs the full pipeline inside a privileged `archlinux` container:
+The build toolchain (`git`, `base-devel`, `archiso`, `go`, `nodejs`, `gtk3`,
+`webkit2gtk`, `grub`, `memtest86+`) is installed once, in the cached `aelum-image`
+built from `./Dockerfile` — so it is not reinstalled on every run. `build.sh`
+runs the rest of the pipeline inside a privileged `archlinux` container:
 
-1. Installs build tooling (`git`, `base-devel`, `archiso`, `grub`, etc.)
-2. Clones the [Aelum profile](https://gitlab.com/aelum/live-iso) and the [Aelum Installer](https://gitlab.com/aelum/installer), and builds the installer binaries
-3. Downloads every official package needed (via a blank-db `pacman -Syw`, so only the dependency tree is pulled)
-4. Builds the listed AUR packages and pulls each one together with its dependency tree into the offline cache
-5. Assembles an offline mirror (`repo-add` + `file://` server) into the profile's `airootfs`
-6. Runs `mkarchiso` to produce the ISO
+1. Clones the [Aelum profile](https://gitlab.com/aelum/live-iso) and the [Aelum Installer](https://gitlab.com/aelum/installer), and builds the installer binaries
+2. Downloads every official package needed (via a blank-db `pacman -Syw`, so only the dependency tree is pulled)
+3. Builds the listed AUR packages and pulls each one together with its dependency tree into the offline cache
+4. Assembles an offline mirror (`repo-add`) into the profile's `airootfs`
+5. Runs `mkarchiso` to produce the ISO
 
 The built ISO is written to the mounted `output/` directory.
 
@@ -24,7 +26,7 @@ The built ISO is written to the mounted `output/` directory.
 
 - Docker + Docker Compose
 - KVM support (for QEMU testing)
-- ~15 GB of free disk space for the build and the ~4.7 GB installed OS
+- ~25 GB of free disk space for the build (the 16G `vdisk.qcow2` and ~3.5 GB ISO are created under `output/` and `.`)
 
 ## Build
 
@@ -78,6 +80,41 @@ docker compose run --rm aelum
 
 The resulting ISO appears in `output/`, e.g. `output/aelum-YYYY.MM.DD-x86_64.iso`.
 
+## Releases
+
+The ISO is too large for GitLab, so releases are published to a Cloudflare
+[R2](https://developers.cloudflare.com/r2/) bucket and the download link is
+updated on the website by hand. Two scripts handle this locally:
+
+**Sign & checksum** — `scripts/make-release.sh`:
+
+```bash
+export AELUM_GPG_KEY='0x1234ABCD'     # or 'Name <email>'
+./scripts/make-release.sh             # newest ISO in output/
+# or release a specific one:
+./scripts/make-release.sh output/aelum-2026.08.28-x86_64.iso
+```
+
+Produces SHA-256/SHA-512 checksums, a detached ASCII-armored GPG signature,
+and exports the public signing key. It verifies everything before printing the
+exact list of assets to upload.
+
+**Upload** — `scripts/publish-iso.sh`:
+
+```bash
+export R2_ACCOUNT_ID=xxxx
+export R2_ACCESS_KEY=yyy
+export R2_SECRET_KEY=zzz
+./scripts/publish-iso.sh v2026.08.28
+# or with an explicit path:
+./scripts/publish-iso.sh v2026.08.28 output/aelum-2026.08.28-x86_64.iso
+```
+
+Builds a throwaway rclone config from the env vars (nothing is written to your
+main `rclone.conf`) and uploads to the `aelum` bucket as `public-read`. The
+release assets (`*.iso`, `*.sha256`, `*.sha512`, `*.asc`, `aelum-release-key.asc`)
+all go to the same R2 folder.
+
 ## Run (QEMU)
 
 ```bash
@@ -103,9 +140,12 @@ Launches the latest ISO in `output/` in QEMU with:
 ├── Dockerfile               # Build toolchain image (archlinux + tooling)
 ├── build.sh                 # Full build pipeline (run inside the container)
 ├── docker-compose.yml       # aelum (build) + aelum-shell (interactive) services
-├── Makefile                 # build / run / stop / attach / clean
+├── Makefile                 # build / image / run / stop / attach / clean
 ├── run.sh                   # QEMU launch script
 ├── output/                  # Built ISO files (bind-mounted from host)
+├── scripts/
+│   ├── make-release.sh      # sign + checksum the ISO for release
+│   └── publish-iso.sh       # upload the ISO to Cloudflare R2
 ├── OVMF_VARS.fd             # UEFI variables for QEMU
 └── vdisk.qcow2              # QEMU virtual disk for testing
 ```
