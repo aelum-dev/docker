@@ -9,13 +9,13 @@ services:
     tty: true
     stdin_open: true
     restart: "no"
-    entrypoint: ["/bin/bash", "/app/build.sh"]
+    entrypoint: ["/bin/bash", "/app/build-iso.sh"]
     environment:
       # Host user id, so build.sh can hand the ISO back to a non-root owner
       - OUTPUT_UID=${UID:-1000}
       - OUTPUT_GID=${GID:-1000}
     volumes:
-      - ./build.sh:/app/build.sh:ro
+      - ./scripts/build-iso.sh:/app/build-iso.sh:ro
       - ./output:/app/live-iso/output
 
   aelum-shell:
@@ -29,5 +29,5 @@ services:
     stdin_open: true
     entrypoint: ["/bin/bash"]
     volumes:
-      - ./build.sh:/app/build.sh:ro
+      - ./scripts/build-iso.sh:/app/build-iso.sh:ro
       - ./output:/app/live-iso/output

@@ -8,7 +8,7 @@ image:
 #   MODE=dry make test   # dry-run smoke test (fast, no real disk writes)
 #   SSH_PORT=2230 make test   # use a different forwarded port
 test:
-	./test.sh
+	./scripts/test-iso.sh
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)

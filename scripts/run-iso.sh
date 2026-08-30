@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Scripts live in scripts/; the project root (output/, firmware, vdisk) is the
+# parent of this script.
+PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 ISO="${1:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | head -1)}"
 

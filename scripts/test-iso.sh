@@ -25,10 +25,13 @@
 set -uo pipefail
 
 # --- Configuration -----------------------------------------------------------
-PROFILE_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Scripts live in scripts/; the project root (output/, vdisk, firmware, logs/)
+# is the parent of this script.
+PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 MODE="${MODE:-full}"                      # full | dry (full = real install)
 SHARED_INSTALLER="${SHARED_INSTALLER:-0}" # 0 = ISO-baked CLI, 1 = run from /shared
+KEEP_ALIVE="${KEEP_ALIVE:-0}"             # 1 = leave QEMU running after a successful run so you can SSH in and re-run the CLI without restarting the VM
 SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
 ROOT_PASS="${ROOT_PASS:-}"                # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
 USERNAME="${USERNAME:-aelum}"             # account created by the installer
@@ -41,7 +44,31 @@ QEMU_EXTRA="${QEMU_EXTRA:-}"              # extra qemu-system-x86_64 args
 LOG_PREFIX="[test]"
 
 log()  { echo "${LOG_PREFIX} $*"; }
-fail() { echo "${LOG_PREFIX} ERROR: $*" >&2; cleanup; exit 1; }
+
+# Print SSH + re-run instructions when KEEP_ALIVE=1. QEMU is a background child,
+# so it keeps running after the script exits and the forwarded :2222 port stays
+# live as long as it runs.
+keep_alive_note() {
+    [ -n "${QEMU_PID:-}" ] || return 0
+    log "KEEP_ALIVE=1: leaving QEMU running (pid $QEMU_PID). SSH in with:"
+    log "  ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost"
+    log "Then re-run the installer CLI directly, e.g.:"
+    log "  ${INSTALLER_BIN:-sudo aelum-installer-cli} --install $DISK_PATH --username $USERNAME 2> $PROGRESS_JSON"
+    log "Find the still-running QEMU with: pgrep -af qemu-system-x86_64"
+}
+
+fail() {
+    echo "${LOG_PREFIX} ERROR: $*" >&2
+    # With KEEP_ALIVE=1, disarm the EXIT cleanup and leave QEMU up so the VM can
+    # be inspected over SSH even after a failed run.
+    if [ "$KEEP_ALIVE" = "1" ]; then
+        trap - EXIT
+        keep_alive_note
+        exit 1
+    fi
+    cleanup
+    exit 1
+}
 
 # Kill leftover QEMU/test processes from an aborted previous run. A stale QEMU
 # holds the vdisk lock, which makes the boot fail with "Failed to get 'write'
@@ -77,7 +104,8 @@ command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 
 VDISK="$PROFILE_DIR/vdisk.qcow2"
 OVMF_VARS="$PROFILE_DIR/OVMF_VARS.fd"
-PROGRESS_JSON="$PROFILE_DIR/test-progress.json"
+PROGRESS_JSON="$PROFILE_DIR/logs/test-progress.json"
+mkdir -p "$(dirname "$PROGRESS_JSON")"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
 kill_stale
@@ -231,4 +259,15 @@ if [ -s "$PROGRESS_JSON" ]; then
 fi
 
 log "SUCCESS ($MODE test passed). Progress: $PROGRESS_JSON"
+
+# With KEEP_ALIVE=1, detach from the EXIT cleanup trap and leave QEMU running so
+# the VM can be SSHed into and the installer CLI re-run over SSH (no QEMU restart
+# per iteration). QEMU is a background child, so it keeps running after this
+# script exits; the forwarded :2222 port stays live as long as it runs.
+if [ "$KEEP_ALIVE" = "1" ]; then
+    trap - EXIT
+    keep_alive_note
+    exit 0
+fi
+
 exit 0

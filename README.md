@@ -11,8 +11,9 @@ holds the content that goes into the ISO.
 
 The build toolchain (`git`, `base-devel`, `archiso`, `go`, `nodejs`, `gtk3`,
 `webkit2gtk`, `grub`, `memtest86+`) is installed once, in the cached `aelum-image`
-built from `./Dockerfile` — so it is not reinstalled on every run. `build.sh`
-runs the rest of the pipeline inside a privileged `archlinux` container:
+built from `./Dockerfile` — so it is not reinstalled on every run. `scripts/
+build-iso.sh` runs the rest of the pipeline inside a privileged `archlinux`
+container:
 
 1. Clones the [Aelum profile](https://gitlab.com/aelum/live-iso) and the [Aelum Installer](https://gitlab.com/aelum/installer), and builds the installer binaries
 2. Downloads every official package needed (via a blank-db `pacman -Syw`, so only the dependency tree is pulled)
@@ -86,13 +87,13 @@ The ISO is too large for GitLab, so releases are published to a Cloudflare
 [R2](https://developers.cloudflare.com/r2/) bucket and the download link is
 updated on the website by hand. Two scripts handle this locally:
 
-**Sign & checksum** — `scripts/make-release.sh`:
+**Sign & checksum** — `scripts/release-iso.sh`:
 
 ```bash
 export AELUM_GPG_KEY='0x1234ABCD'     # or 'Name <email>'
-./scripts/make-release.sh             # newest ISO in output/
+./scripts/release-iso.sh              # newest ISO in output/
 # or release a specific one:
-./scripts/make-release.sh output/aelum-2026.08.28-x86_64.iso
+./scripts/release-iso.sh output/aelum-2026.08.28-x86_64.iso
 ```
 
 Produces SHA-256/SHA-512 checksums, a detached ASCII-armored GPG signature,
@@ -118,7 +119,7 @@ all go to the same R2 folder.
 ## Run (QEMU)
 
 ```bash
-bash run.sh
+bash scripts/run-iso.sh
 ```
 
 Launches the latest ISO in `output/` in QEMU with:
@@ -136,8 +137,8 @@ Launches the latest ISO in `output/` in QEMU with:
 ## Test (headless QEMU + installer CLI)
 
 ```bash
-bash test.sh            # real install
-MODE=dry bash test.sh   # dry-run smoke test (fast, no real disk writes)
+bash scripts/test-iso.sh            # real install
+MODE=dry bash scripts/test-iso.sh   # dry-run smoke test (fast, no real disk writes)
 ```
 
 Boots the ISO in a display-less QEMU VM, waits for `sshd`, and drives
@@ -152,23 +153,27 @@ stderr — so the graphical frontend is never needed for automated testing.
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
   `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`.
 - Also exposed as `make test` / `MODE=dry make test`.
-- Artifacts: `test-serial.log` (guest serial console), `test-progress.json`
-  (installer stderr / JSON progress).
+- Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
+  progress). `test-iso.sh` also supports `KEEP_ALIVE=1` to leave the VM running
+  after a run (success or failure) so you can SSH in and re-run the CLI without
+  rebooting.
+- `make test` is equivalent to `./scripts/test-iso.sh`.
 
 ## Layout
 
 ```
 .
-├── Dockerfile               # Build toolchain image (archlinux + tooling)
-├── build.sh                 # Full build pipeline (run inside the container)
-├── docker-compose.yml       # aelum (build) + aelum-shell (interactive) services
-├── Makefile                 # build / image / run / test / stop / attach / clean
-├── run.sh                   # QEMU launch script
-├── test.sh                  # headless QEMU + installer-cli test
-├── output/                  # Built ISO files (bind-mounted from host)
+├── Dockerfile                 # Build toolchain image (archlinux + tooling)
+├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
+├── Makefile                   # build / image / run / test / stop / attach / clean
 ├── scripts/
-│   ├── make-release.sh      # sign + checksum the ISO for release
-│   └── publish-iso.sh       # upload the ISO to Cloudflare R2
-├── OVMF_VARS.fd             # UEFI variables for QEMU
-└── vdisk.qcow2              # QEMU virtual disk for testing
+│   ├── build-iso.sh           # Full build pipeline (run inside the container)
+│   ├── run-iso.sh             # QEMU launch script
+│   ├── test-iso.sh            # headless QEMU + installer-cli test
+│   ├── release-iso.sh         # sign + checksum the ISO for release
+│   └── publish-iso.sh         # upload the ISO to Cloudflare R2
+├── logs/                      # test artifacts (test-progress.json, test-run.log)
+├── output/                    # Built ISO files (bind-mounted from host)
+├── OVMF_VARS.fd               # UEFI variables for QEMU
+└── vdisk.qcow2                # QEMU virtual disk for testing
 ```

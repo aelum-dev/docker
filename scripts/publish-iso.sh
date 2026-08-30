@@ -18,11 +18,14 @@
 #      required for bucket/Object-scoped API tokens (avoids CreateBucket 403).
 #
 # Usage:
-#   scripts/publish-iso.sh v2026.08.27 docker/output/aelum-2026.08.27-x86_64.iso
+#   scripts/publish-iso.sh v2026.08.27 output/aelum-2026.08.27-x86_64.iso
 #
-# If no tag/file is given, it auto-selects the newest *.iso in docker/output/.
+# If no tag/file is given, it auto-selects the newest *.iso in output/.
 
 set -euo pipefail
+
+# Scripts live in scripts/; the project root (output/) is the parent dir.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 R2_BUCKET="${R2_BUCKET:-aelum}"
 R2_ACCOUNT_ID="${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID (top-right of Cloudflare dashboard)}"
@@ -31,7 +34,7 @@ R2_ACCESS_KEY="${R2_ACCESS_KEY:?set R2_ACCESS_KEY (Access Key ID from API token)
 R2_SECRET_KEY="${R2_SECRET_KEY:?set R2_SECRET_KEY (Secret Access Key from API token)}"
 
 TAG="${1:?usage: publish-iso.sh <tag> [iso-path]}"
-ISO_PATH="${2:-$(ls -1t docker/output/*.iso 2>/dev/null | head -1)}"
+ISO_PATH="${2:-$(ls -1t "$ROOT_DIR"/output/*.iso 2>/dev/null | head -1)}"
 
 if [[ ! -f "$ISO_PATH" ]]; then
   echo "ERROR: no ISO found at $ISO_PATH" >&2

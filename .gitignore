@@ -6,4 +6,5 @@ OVMF_VARS.fd
 vdisk.qcow2
 
 # test.sh artifacts
-test-progress.json
+logs/test-progress.json
+logs/test-run.log
