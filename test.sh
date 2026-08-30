@@ -11,6 +11,12 @@
 #   MODE=full    (default) Run a real install against the vdisk.
 #   MODE=dry     Run --install --dry-run. Fast, no real disk writes. Smoke test.
 #
+#   SHARED_INSTALLER=1  Run the freshly built CLI from /shared instead of the
+#                       version baked into the ISO. Useful to test the latest
+#                       build without rebuilding the ISO:
+#                         SHARED_INSTALLER=1 MODE=full ./test.sh
+#                       (the host shared/ dir is mounted at /shared inside the VM).
+#
 # Requirements: qemu-system-x86_64, sshpass, ssh.
 #   KVM is optional: without /dev/kvm, drop -enable-kvm/-cpu host (see below).
 #
@@ -22,6 +28,8 @@ set -uo pipefail
 PROFILE_DIR="$(cd "$(dirname "$0")" && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 MODE="${MODE:-full}"                      # full | dry (full = real install)
+SHARED_INSTALLER="${SHARED_INSTALLER:-0}" # 0 = ISO-baked CLI, 1 = run from /shared
+SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
 ROOT_PASS="${ROOT_PASS:-}"                # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
 USERNAME="${USERNAME:-aelum}"             # account created by the installer
 USER_PASS="${USER_PASS:-aelum}"           # password set for that account (full mode)
@@ -131,6 +139,14 @@ QEMU_ARGS=(
     -netdev user,id=net0,hostfwd=tcp::"${SSH_PORT}-:22" -device virtio-net-pci,netdev=net0
     -vnc none
 )
+
+# When testing the freshly built CLI from /shared, expose the host shared dir to
+# the guest via a 9p virtfs mount (mirrors run.sh). The live ISO's shared-mount
+# service then mounts it at /shared on boot.
+if [ "$SHARED_INSTALLER" = "1" ]; then
+    [ -d "$SHARED_DIR" ] || fail "SHARED_INSTALLER=1 but SHARED_DIR not found: $SHARED_DIR"
+    QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
+fi
 if [ "$QEMU_QVM" = "1" ] && [ -e /dev/kvm ]; then
     QEMU_ARGS=(-enable-kvm -cpu host "${QEMU_ARGS[@]}")
 else
@@ -153,19 +169,48 @@ QEMU_PID=$!
 
 wait_for_ssh
 
+# When running from /shared, wait for the 9p mount to come up (shared-mount
+# service) before launching, so we don't race the mount and hit "command not found".
+if [ "$SHARED_INSTALLER" = "1" ]; then
+    log "Waiting for /shared/aelum-installer-cli to be available ..."
+    shared_ready=0
+    for i in $(seq 1 30); do
+        if ssh_root "test -x /shared/aelum-installer-cli" 2>/dev/null; then
+            log "/shared ready (after ~$((i * 2))s)"
+            shared_ready=1
+            break
+        fi
+        sleep 2
+    done
+    [ "$shared_ready" = "1" ] || fail "/shared/aelum-installer-cli not found after wait (is SHARED_DIR mounted?)."
+fi
+
+# --- Installer to run --------------------------------------------------------
+# By default the test drives the CLI baked into the ISO. With SHARED_INSTALLER=1
+# it runs the freshly built binary from /shared (mounted host<->VM) instead,
+# using an absolute path so sudo resolves it reliably:
+#   sudo /shared/aelum-installer-cli
+if [ "$SHARED_INSTALLER" = "1" ]; then
+    INSTALLER_BIN="sudo /shared/aelum-installer-cli"
+    log "Using freshly built CLI from /shared"
+else
+    INSTALLER_BIN="sudo aelum-installer-cli"
+    log "Using CLI baked into the ISO"
+fi
+
 # --- Run the installer -------------------------------------------------------
 # The CLI reads the user *password* from stdin; the username comes from
 # --username. In --dry-run neither is read, so no stdin is needed there.
 if [ "$MODE" = "dry" ]; then
     log "Running installer CLI (dry-run) on $DISK_PATH ..."
     sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-        "sudo aelum-installer-cli --install ${DISK_PATH} --dry-run --username ${USERNAME}" 2> "$PROGRESS_JSON"
+        "${INSTALLER_BIN} --install ${DISK_PATH} --dry-run --username ${USERNAME}" 2> "$PROGRESS_JSON"
     RC=$?
 else
     log "Running installer CLI (full install) on $DISK_PATH ..."
     printf '%s\n' "$USER_PASS" \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-            "sudo aelum-installer-cli --install ${DISK_PATH} --username ${USERNAME}" 2> "$PROGRESS_JSON"
+            "${INSTALLER_BIN} --install ${DISK_PATH} --username ${USERNAME}" 2> "$PROGRESS_JSON"
     RC=$?
 fi
 
