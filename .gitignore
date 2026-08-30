@@ -4,3 +4,7 @@ output/
 # QEMU VM files
 OVMF_VARS.fd
 vdisk.qcow2
+
+# test.sh artifacts
+test-serial.log
+test-progress.json

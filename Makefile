@@ -1,7 +1,14 @@
-.PHONY: build shell stop attach clean image
+.PHONY: build shell stop attach clean image test
 
 image:
 	docker compose build $(BUILD_FLAGS)
+
+# Headless QEMU + installer-cli test (runs on the host, needs KVM + sshpass).
+#   make test            # real install (default)
+#   MODE=dry make test   # dry-run smoke test (fast, no real disk writes)
+#   SSH_PORT=2230 make test   # use a different forwarded port
+test:
+	./test.sh
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)

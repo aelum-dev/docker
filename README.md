@@ -133,6 +133,28 @@ Launches the latest ISO in `output/` in QEMU with:
 
 `OVMF_VARS.fd` and `vdisk.qcow2` are created on first run if absent.
 
+## Test (headless QEMU + installer CLI)
+
+```bash
+bash test.sh            # real install
+MODE=dry bash test.sh   # dry-run smoke test (fast, no real disk writes)
+```
+
+Boots the ISO in a display-less QEMU VM, waits for `sshd`, and drives
+`aelum-installer-cli` over SSH (forwarded port 2222) against the virtual disk.
+The installer CLI is headless by design — password via stdin, JSON progress to
+stderr — so the graphical frontend is never needed for automated testing.
+
+- Requires `qemu-system-x86_64`, `sshpass`, `ssh`. KVM is optional (falls back
+  to software emulation when `/dev/kvm` is absent).
+- Live-ISO `root` (empty password) is used to run the installer. `MODE=full`
+  performs a real install; `MODE=dry` runs `--dry-run`.
+- Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
+  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`.
+- Also exposed as `make test` / `MODE=dry make test`.
+- Artifacts: `test-serial.log` (guest serial console), `test-progress.json`
+  (installer stderr / JSON progress).
+
 ## Layout
 
 ```
@@ -140,8 +162,9 @@ Launches the latest ISO in `output/` in QEMU with:
 ├── Dockerfile               # Build toolchain image (archlinux + tooling)
 ├── build.sh                 # Full build pipeline (run inside the container)
 ├── docker-compose.yml       # aelum (build) + aelum-shell (interactive) services
-├── Makefile                 # build / image / run / stop / attach / clean
+├── Makefile                 # build / image / run / test / stop / attach / clean
 ├── run.sh                   # QEMU launch script
+├── test.sh                  # headless QEMU + installer-cli test
 ├── output/                  # Built ISO files (bind-mounted from host)
 ├── scripts/
 │   ├── make-release.sh      # sign + checksum the ISO for release
