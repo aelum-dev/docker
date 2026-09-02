@@ -1,74 +1,45 @@
 #!/usr/bin/env bash
 #
-# Headless QEMU + installer-cli smoke/integration test for the Aelum ISO.
+# Headless QEMU driver for the Aelum ISO. Two modes:
 #
-# Boots the built ISO in a display-less QEMU VM, waits for sshd, and drives
-# aelum-installer-cli over SSH against the virtual disk. The installer CLI is
-# fully headless: the password is read from stdin and JSON progress is written
-# to stderr, so it can be scripted without the graphical frontend.
+#   MODE=auto   (default) Boot the ISO, wait for ssh, and run the installer CLI
+#               (from /shared when SHARED_INSTALLER=1, else the version baked
+#               into the ISO) to do a full automatic install against the vdisk.
+#               QEMU is stopped when the test finishes.
 #
-# Modes:
-#   MODE=full    (default) Run a real install against the vdisk.
-#   MODE=dry     Run --install --dry-run. Fast, no real disk writes. Smoke test.
-#
-#   SHARED_INSTALLER=1  Run the freshly built CLI from /shared instead of the
-#                       version baked into the ISO. Useful to test the latest
-#                       build without rebuilding the ISO:
-#                         SHARED_INSTALLER=1 MODE=full ./test.sh
-#                       (the host shared/ dir is mounted at /shared inside the VM).
+#   MODE=boot   Boot the ISO headless and leave it running so you can SSH in and
+#               experiment. QEMU is detached and survives this script exiting.
 #
 # Requirements: qemu-system-x86_64, sshpass, ssh.
-#   KVM is optional: without /dev/kvm, drop -enable-kvm/-cpu host (see below).
-#
-# Configuration (all optional, see defaults below).
+#   KVM is optional: without /dev/kvm, set QEMU_QVM=0.
 
 set -uo pipefail
 
-# --- Configuration -----------------------------------------------------------
 # Scripts live in scripts/; the project root (output/, vdisk, firmware, logs/)
 # is the parent of this script.
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
-MODE="${MODE:-full}"                      # full | dry (full = real install)
-SHARED_INSTALLER="${SHARED_INSTALLER:-0}" # 0 = ISO-baked CLI, 1 = run from /shared
-KEEP_ALIVE="${KEEP_ALIVE:-0}"             # 1 = leave QEMU running after a successful run so you can SSH in and re-run the CLI without restarting the VM
+MODE="${MODE:-auto}"                       # auto | boot
+SHARED_INSTALLER="${SHARED_INSTALLER:-0}"  # 1 = run installer from /shared instead of the ISO
 SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
-ROOT_PASS="${ROOT_PASS:-}"                # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
-USERNAME="${USERNAME:-aelum}"             # account created by the installer
-USER_PASS="${USER_PASS:-aelum}"           # password set for that account (full mode)
-SSH_PORT="${SSH_PORT:-2222}"              # host port forwarded to guest :22
-DISK_PATH="${DISK_PATH:-/dev/vda}"        # disk path *inside* the guest
-QEMU_QVM="${QEMU_QVM:-1}"                 # 1 = use -enable-kvm -cpu host
-QEMU_EXTRA="${QEMU_EXTRA:-}"              # extra qemu-system-x86_64 args
+ROOT_PASS="${ROOT_PASS:-}"                 # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
+USERNAME="${USERNAME:-aelum}"              # account created by the installer (auto mode)
+USER_PASS="${USER_PASS:-aelum}"            # password for that account (auto mode)
+SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
+DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
+QEMU_QVM="${QEMU_QVM:-1}"                  # 1 = use -enable-kvm -cpu host
+QEMU_EXTRA="${QEMU_EXTRA:-}"               # extra qemu-system-x86_64 args
 
 LOG_PREFIX="[test]"
+VDISK="$PROFILE_DIR/vdisk.qcow2"
+OVMF_VARS="$PROFILE_DIR/OVMF_VARS.fd"
+PROGRESS_JSON="$PROFILE_DIR/logs/test-progress.json"
+QEMU_LOG="$PROFILE_DIR/logs/qemu.log"
+mkdir -p "$(dirname "$PROGRESS_JSON")"
 
 log()  { echo "${LOG_PREFIX} $*"; }
-
-# Print SSH + re-run instructions when KEEP_ALIVE=1. QEMU is a background child,
-# so it keeps running after the script exits and the forwarded :2222 port stays
-# live as long as it runs.
-keep_alive_note() {
-    [ -n "${QEMU_PID:-}" ] || return 0
-    log "KEEP_ALIVE=1: leaving QEMU running (pid $QEMU_PID). SSH in with:"
-    log "  ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost"
-    log "Then re-run the installer CLI directly, e.g.:"
-    log "  ${INSTALLER_BIN:-sudo aelum-installer-cli} --install $DISK_PATH --username $USERNAME 2> $PROGRESS_JSON"
-    log "Find the still-running QEMU with: pgrep -af qemu-system-x86_64"
-}
-
-fail() {
-    echo "${LOG_PREFIX} ERROR: $*" >&2
-    # With KEEP_ALIVE=1, disarm the EXIT cleanup and leave QEMU up so the VM can
-    # be inspected over SSH even after a failed run.
-    if [ "$KEEP_ALIVE" = "1" ]; then
-        trap - EXIT
-        keep_alive_note
-        exit 1
-    fi
-    cleanup
-    exit 1
-}
+err()  { echo "${LOG_PREFIX} ERROR: $*" >&2; }
+fail() { err "$*"; exit 1; }
 
 # Kill leftover QEMU/test processes from an aborted previous run. A stale QEMU
 # holds the vdisk lock, which makes the boot fail with "Failed to get 'write'
@@ -90,9 +61,7 @@ kill_stale() {
         kill -9 "$pid" 2>/dev/null
     done
     # Drop a stale qcow2 lock only if its holder is already gone.
-    if [ -e "$VDISK.lock" ]; then
-        rm -f "$VDISK.lock"
-    fi
+    [ -e "$VDISK.lock" ] && rm -f "$VDISK.lock"
     sleep 2
 }
 
@@ -101,19 +70,15 @@ command -v qemu-system-x86_64 >/dev/null 2>&1 || fail "qemu-system-x86_64 not fo
 command -v sshpass          >/dev/null 2>&1 || fail "sshpass not found (apt/dnf install sshpass)"
 command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ -n "$ISO" ] && [ -f "$ISO" ] || fail "no ISO found in $PROFILE_DIR/output/ (build it first with 'make build')"
-
-VDISK="$PROFILE_DIR/vdisk.qcow2"
-OVMF_VARS="$PROFILE_DIR/OVMF_VARS.fd"
-PROGRESS_JSON="$PROFILE_DIR/logs/test-progress.json"
-mkdir -p "$(dirname "$PROGRESS_JSON")"
+[ "$MODE" = "auto" ] || [ "$MODE" = "boot" ] || fail "MODE must be 'auto' or 'boot' (got '$MODE')"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
 kill_stale
 
-# --- Virtual disk ---------------
-# Start from a clean disk each run so partition/format/rollback are exercised
-# against a fresh target.
-if [ "$MODE" = "full" ]; then
+# --- Virtual disk ------------------------------------------------------------
+# Auto mode starts from a clean disk each run so partition/format are exercised
+# against a fresh target. Boot mode leaves the vdisk untouched for experiments.
+if [ "$MODE" = "auto" ]; then
     log "Recreating virtual disk ($VDISK, 20G) ..."
     qemu-img create -f qcow2 "$VDISK" 20G >/dev/null || fail "could not create vdisk"
 fi
@@ -185,20 +150,32 @@ if [ -n "$QEMU_EXTRA" ]; then
     QEMU_ARGS+=($QEMU_EXTRA)
 fi
 
-QEMU_PID=""
+# --- Boot mode: leave the VM running for experiments -------------------------
+if [ "$MODE" = "boot" ]; then
+    # Detach QEMU into its own session so it keeps running after this script
+    # exits, and leave it up for SSH + experiments.
+    log "Booting QEMU headless (boot mode), leaving it running ..."
+    setsid qemu-system-x86_64 "${QEMU_ARGS[@]}" < /dev/null > "$QEMU_LOG" 2>&1 &
+    wait_for_ssh
+    log "VM is up. SSH in with:"
+    log "  ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost"
+    log "Find the QEMU process with: pgrep -af qemu-system-x86_64"
+    exit 0
+fi
+
+# --- Auto mode: boot, run the installer, then stop QEMU ----------------------
+log "Booting QEMU headless (auto mode) ..."
+qemu-system-x86_64 "${QEMU_ARGS[@]}" &
+QEMU_PID=$!
 cleanup() {
     [ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null && wait "$QEMU_PID" 2>/dev/null
 }
 trap cleanup EXIT
 
-log "Booting QEMU headless (mode=$MODE) ..."
-qemu-system-x86_64 "${QEMU_ARGS[@]}" &
-QEMU_PID=$!
-
 wait_for_ssh
 
-# When running from /shared, wait for the 9p mount to come up (shared-mount
-# service) before launching, so we don't race the mount and hit "command not found".
+# When running from /shared, wait for the 9p mount to come up before launching
+# the installer, so we don't race the mount and hit "command not found".
 if [ "$SHARED_INSTALLER" = "1" ]; then
     log "Waiting for /shared/aelum-installer-cli to be available ..."
     shared_ready=0
@@ -213,11 +190,9 @@ if [ "$SHARED_INSTALLER" = "1" ]; then
     [ "$shared_ready" = "1" ] || fail "/shared/aelum-installer-cli not found after wait (is SHARED_DIR mounted?)."
 fi
 
-# --- Installer to run --------------------------------------------------------
 # By default the test drives the CLI baked into the ISO. With SHARED_INSTALLER=1
-# it runs the freshly built binary from /shared (mounted host<->VM) instead,
-# using an absolute path so sudo resolves it reliably:
-#   sudo /shared/aelum-installer-cli
+# it runs the freshly built binary from /shared instead, using an absolute path
+# so sudo resolves it reliably.
 if [ "$SHARED_INSTALLER" = "1" ]; then
     INSTALLER_BIN="sudo /shared/aelum-installer-cli"
     log "Using freshly built CLI from /shared"
@@ -226,48 +201,17 @@ else
     log "Using CLI baked into the ISO"
 fi
 
-# --- Run the installer -------------------------------------------------------
 # The CLI reads the user *password* from stdin; the username comes from
-# --username. In --dry-run neither is read, so no stdin is needed there.
-if [ "$MODE" = "dry" ]; then
-    log "Running installer CLI (dry-run) on $DISK_PATH ..."
-    sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-        "${INSTALLER_BIN} --install ${DISK_PATH} --dry-run --username ${USERNAME}" 2> "$PROGRESS_JSON"
-    RC=$?
-else
-    log "Running installer CLI (full install) on $DISK_PATH ..."
-    printf '%s\n' "$USER_PASS" \
-        | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-            "${INSTALLER_BIN} --install ${DISK_PATH} --username ${USERNAME}" 2> "$PROGRESS_JSON"
-    RC=$?
-fi
+# --username.
+log "Running installer install on $DISK_PATH ..."
+printf '%s\n' "$USER_PASS" \
+    | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
+    "${INSTALLER_BIN} --install ${DISK_PATH} --username ${USERNAME}" 2> "$PROGRESS_JSON"
+RC=$?
 
-# --- Assert the run ----------------------------------------------------------
 if [ "$RC" -ne 0 ]; then
     fail "installer CLI exited with code $RC (see $PROGRESS_JSON)"
 fi
 log "installer CLI exited 0"
-
-if [ -s "$PROGRESS_JSON" ]; then
-    # The installer streams one JSON event per line to stderr; report a compact
-    # summary. The real gate below is the exit code, not this output.
-    events=$(grep -c '^{' "$PROGRESS_JSON" 2>/dev/null || echo 0)
-    log "installer emitted ${events} progress event(s)"
-    if grep -qiE 'error|fail|panic' "$PROGRESS_JSON"; then
-        log "warning: progress output contained error/fail keywords (exit code was 0)"
-    fi
-fi
-
-log "SUCCESS ($MODE test passed). Progress: $PROGRESS_JSON"
-
-# With KEEP_ALIVE=1, detach from the EXIT cleanup trap and leave QEMU running so
-# the VM can be SSHed into and the installer CLI re-run over SSH (no QEMU restart
-# per iteration). QEMU is a background child, so it keeps running after this
-# script exits; the forwarded :2222 port stays live as long as it runs.
-if [ "$KEEP_ALIVE" = "1" ]; then
-    trap - EXIT
-    keep_alive_note
-    exit 0
-fi
-
+log "SUCCESS (auto test passed). Progress: $PROGRESS_JSON"
 exit 0

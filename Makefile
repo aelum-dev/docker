@@ -3,9 +3,10 @@
 image:
 	docker compose build $(BUILD_FLAGS)
 
-# Headless QEMU + installer-cli test (runs on the host, needs KVM + sshpass).
-#   make test            # real install (default)
-#   MODE=dry make test   # dry-run smoke test (fast, no real disk writes)
+# Headless QEMU driver for the Aelum ISO (runs on the host, needs KVM + sshpass).
+#   make test                 # auto: boot, run a full install, stop (default)
+#   MODE=boot make test       # boot: leave the headless VM running for experiments
+#   SHARED_INSTALLER=1 make test   # run the freshly built CLI from /shared
 #   SSH_PORT=2230 make test   # use a different forwarded port
 test:
 	./scripts/test-iso.sh

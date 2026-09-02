@@ -134,29 +134,36 @@ Launches the latest ISO in `output/` in QEMU with:
 
 `OVMF_VARS.fd` and `vdisk.qcow2` are created on first run if absent.
 
-## Test (headless QEMU + installer CLI)
+## Test / boot (headless QEMU + installer CLI)
 
 ```bash
-bash scripts/test-iso.sh            # real install
-MODE=dry bash scripts/test-iso.sh   # dry-run smoke test (fast, no real disk writes)
+bash scripts/test-iso.sh        # auto: boot, run a full install, then stop QEMU
+MODE=boot bash scripts/test-iso.sh   # boot: leave the headless VM running for experiments
 ```
 
-Boots the ISO in a display-less QEMU VM, waits for `sshd`, and drives
-`aelum-installer-cli` over SSH (forwarded port 2222) against the virtual disk.
-The installer CLI is headless by design — password via stdin, JSON progress to
-stderr — so the graphical frontend is never needed for automated testing.
+Two modes, selected with `MODE`:
 
-- Requires `qemu-system-x86_64`, `sshpass`, `ssh`. KVM is optional (falls back
-  to software emulation when `/dev/kvm` is absent).
-- Live-ISO `root` (empty password) is used to run the installer. `MODE=full`
-  performs a real install; `MODE=dry` runs `--dry-run`.
+- `auto` (default) — boots the ISO in a display-less QEMU VM, waits for `sshd`,
+  and drives `aelum-installer-cli` over SSH (forwarded port 2222) to run a full
+  automatic install against a freshly recreated virtual disk. QEMU is stopped
+  when the test finishes. The installer CLI is headless by design — password via
+  stdin, JSON progress to stderr — so the graphical frontend is never needed.
+- `boot` — boots the ISO headless and leaves it running (detached) so you can
+  SSH in and experiment. The virtual disk is left untouched.
+
+Requires `qemu-system-x86_64`, `sshpass`, `ssh`. KVM is optional (falls back to
+software emulation when `/dev/kvm` is absent). Live-ISO `root` (empty password)
+is used to log in.
+
+- `SHARED_INSTALLER=1` runs the freshly built CLI from `/shared` (the host
+  `shared/` dir, mounted at `/shared` in the VM) instead of the version baked
+  into the ISO — test the latest build without rebuilding the ISO.
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
-  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`.
-- Also exposed as `make test` / `MODE=dry make test`.
+  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`,
+  `SHARED_INSTALLER`, `SHARED_DIR`.
 - Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
-  progress). `test-iso.sh` also supports `KEEP_ALIVE=1` to leave the VM running
-  after a run (success or failure) so you can SSH in and re-run the CLI without
-  rebooting.
+  progress in auto mode), `qemu.log` (QEMU output).
+- Also exposed as `make test` (`MODE=boot make test` for the boot mode).
 - `make test` is equivalent to `./scripts/test-iso.sh`.
 
 ## Layout

@@ -8,3 +8,4 @@ vdisk.qcow2
 # test.sh artifacts
 logs/test-progress.json
 logs/test-run.log
+logs/qemu.log
