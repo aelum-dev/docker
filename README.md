@@ -64,6 +64,22 @@ docker compose build --no-cache aelum
 Rebuild with `--no-cache` whenever you change `./Dockerfile` or want to pick up
 updated packages in the `archlinux:latest` base.
 
+### Update the toolchain image to the latest Arch packages
+
+`archlinux:latest` is a rolling daily tag, so the base image drifts over time.
+To refresh the `aelum-image` against the newest Arch packages (re-pulling the
+base and re-running the toolchain install), use:
+
+```bash
+make update     # rebuild aelum-image from the latest Arch base, saved
+```
+
+This stops/removes any running containers, deletes the old `aelum-image`, and
+rebuilds it with `--no-cache` so it re-pulls the current `archlinux:latest` and
+bakes in the updated packages. Afterward, every `make build` / `make test`
+starts from the updated image. (Equivalently: `docker rmi -f aelum-image &&
+docker compose build --no-cache`.)
+
 To debug or work interactively:
 
 ```bash
@@ -231,7 +247,7 @@ real install by running the same command with `--dry-run` appended.
 .
 ├── Dockerfile                 # Build toolchain image (archlinux + tooling)
 ├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
-├── Makefile                   # build / image / run / test / test-boot / stop / attach / clean
+├── Makefile                   # build / image / update / run / test / test-boot / stop / attach / clean
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
