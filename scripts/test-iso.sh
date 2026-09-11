@@ -3,12 +3,13 @@
 # Headless QEMU driver for the Aelum ISO. Two modes:
 #
 #   MODE=auto   (default) Boot the ISO, wait for ssh, and run the installer CLI
-#               (from /shared when SHARED_INSTALLER=1, else the version baked
-#               into the ISO) to do a full automatic install against the vdisk.
-#               QEMU is stopped when the test finishes.
+#               (the version baked into the ISO) to do a full automatic install
+#               against the vdisk. QEMU is stopped when the test finishes.
 #
-#   MODE=boot   Boot the ISO headless and leave it running so you can SSH in and
-#               experiment. QEMU is detached and survives this script exiting.
+#   MODE=boot   Boot the ISO headless, mount the host shared dir at /shared in
+#               the guest, and leave it running so you can SSH in and launch the
+#               freshly built installer from /shared. QEMU is detached and
+#               survives this script exiting.
 #
 # Requirements: qemu-system-x86_64, sshpass, ssh.
 #   KVM is optional: without /dev/kvm, set QEMU_QVM=0.
@@ -20,7 +21,6 @@ set -uo pipefail
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 MODE="${MODE:-auto}"                       # auto | boot
-SHARED_INSTALLER="${SHARED_INSTALLER:-0}"  # 1 = run installer from /shared instead of the ISO
 SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
 ROOT_PASS="${ROOT_PASS:-}"                 # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
 USERNAME="${USERNAME:-aelum}"              # account created by the installer (auto mode)
@@ -133,13 +133,14 @@ QEMU_ARGS=(
     -vnc none
 )
 
-# When testing the freshly built CLI from /shared, expose the host shared dir to
-# the guest via a 9p virtfs mount (mirrors run.sh). The live ISO's shared-mount
-# service then mounts it at /shared on boot.
-if [ "$SHARED_INSTALLER" = "1" ]; then
-    [ -d "$SHARED_DIR" ] || fail "SHARED_INSTALLER=1 but SHARED_DIR not found: $SHARED_DIR"
+# In boot mode, expose the host shared dir to the guest via a 9p virtfs mount
+# (mirrors run.sh). The live ISO's shared-mount service then mounts it at
+# /shared on boot, so the freshly built installer can be launched from there.
+if [ "$MODE" = "boot" ]; then
+    [ -d "$SHARED_DIR" ] || fail "MODE=boot but SHARED_DIR not found: $SHARED_DIR"
     QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
 fi
+
 if [ "$QEMU_QVM" = "1" ] && [ -e /dev/kvm ]; then
     QEMU_ARGS=(-enable-kvm -cpu host "${QEMU_ARGS[@]}")
 else
@@ -157,6 +158,19 @@ if [ "$MODE" = "boot" ]; then
     log "Booting QEMU headless (boot mode), leaving it running ..."
     setsid qemu-system-x86_64 "${QEMU_ARGS[@]}" < /dev/null > "$QEMU_LOG" 2>&1 &
     wait_for_ssh
+    # Wait for the 9p /shared mount to come up so the freshly built installer is
+    # available before we hand off to the user.
+    log "Waiting for /shared/aelum-installer-cli to be available ..."
+    shared_ready=0
+    for i in $(seq 1 30); do
+        if ssh_root "test -x /shared/aelum-installer-cli" 2>/dev/null; then
+            log "/shared ready (after ~$((i * 2))s)"
+            shared_ready=1
+            break
+        fi
+        sleep 2
+    done
+    [ "$shared_ready" = "1" ] || fail "/shared/aelum-installer-cli not found after wait (is SHARED_DIR mounted?)"
     log "VM is up. SSH in with:"
     log "  ssh -p $SSH_PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost"
     log "Find the QEMU process with: pgrep -af qemu-system-x86_64"
@@ -174,32 +188,10 @@ trap cleanup EXIT
 
 wait_for_ssh
 
-# When running from /shared, wait for the 9p mount to come up before launching
-# the installer, so we don't race the mount and hit "command not found".
-if [ "$SHARED_INSTALLER" = "1" ]; then
-    log "Waiting for /shared/aelum-installer-cli to be available ..."
-    shared_ready=0
-    for i in $(seq 1 30); do
-        if ssh_root "test -x /shared/aelum-installer-cli" 2>/dev/null; then
-            log "/shared ready (after ~$((i * 2))s)"
-            shared_ready=1
-            break
-        fi
-        sleep 2
-    done
-    [ "$shared_ready" = "1" ] || fail "/shared/aelum-installer-cli not found after wait (is SHARED_DIR mounted?)."
-fi
-
-# By default the test drives the CLI baked into the ISO. With SHARED_INSTALLER=1
-# it runs the freshly built binary from /shared instead, using an absolute path
-# so sudo resolves it reliably.
-if [ "$SHARED_INSTALLER" = "1" ]; then
-    INSTALLER_BIN="sudo /shared/aelum-installer-cli"
-    log "Using freshly built CLI from /shared"
-else
-    INSTALLER_BIN="sudo aelum-installer-cli"
-    log "Using CLI baked into the ISO"
-fi
+# The test drives the CLI baked into the ISO (using an absolute path so sudo
+# resolves it reliably).
+INSTALLER_BIN="sudo aelum-installer-cli"
+log "Using CLI baked into the ISO"
 
 # The CLI reads the user *password* from stdin; the username comes from
 # --username.

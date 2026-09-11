@@ -149,22 +149,81 @@ Two modes, selected with `MODE`:
   when the test finishes. The installer CLI is headless by design — password via
   stdin, JSON progress to stderr — so the graphical frontend is never needed.
 - `boot` — boots the ISO headless and leaves it running (detached) so you can
-  SSH in and experiment. The virtual disk is left untouched.
+  SSH in and experiment. The virtual disk is left untouched. The host `shared/`
+  dir is mounted at `/shared` in the VM automatically, so the freshly built
+  installer CLI (from `installer/build/bin/`) can be launched there directly —
+  no need to rebuild the ISO to test a new build.
 
 Requires `qemu-system-x86_64`, `sshpass`, `ssh`. KVM is optional (falls back to
 software emulation when `/dev/kvm` is absent). Live-ISO `root` (empty password)
 is used to log in.
 
-- `SHARED_INSTALLER=1` runs the freshly built CLI from `/shared` (the host
-  `shared/` dir, mounted at `/shared` in the VM) instead of the version baked
-  into the ISO — test the latest build without rebuilding the ISO.
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
-  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`,
-  `SHARED_INSTALLER`, `SHARED_DIR`.
+  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`, `SHARED_DIR`.
 - Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
   progress in auto mode), `qemu.log` (QEMU output).
-- Also exposed as `make test` (`MODE=boot make test` for the boot mode).
-- `make test` is equivalent to `./scripts/test-iso.sh`.
+- Also exposed as make targets: `make test` (auto) and `make test-boot` (boot).
+- `make test` is equivalent to `MODE=auto ./scripts/test-iso.sh`; `make test-boot` to `MODE=boot ./scripts/test-iso.sh`.
+
+### Testing the installer CLI
+
+The installer CLI is headless by design: the password is read from stdin and
+progress is emitted as JSON to stderr, so the graphical frontend is never
+needed for these tests.
+
+**Automatic mode** — a full install against a fresh virtual disk, then QEMU is
+stopped. The disk is recreated from scratch each run so format/partitioning is
+exercised against a clean target:
+
+```bash
+MODE=auto bash scripts/test-iso.sh
+# or pin the filesystem / account:
+USERNAME=aelum USER_PASS=aelum DISK_PATH=/dev/vda MODE=auto bash scripts/test-iso.sh
+```
+
+**Manual / dualboot mode** — boot the VM headless (this also mounts the host
+`shared/` at `/shared`), then run the freshly built CLI with a `--manual-layout`
+JSON. The layout designates exactly one `esp` and one `system` partition; every
+other partition on the disk is left untouched, which is what makes it dualboot
+safe.
+
+```bash
+# 1) Boot headless with /shared mounted, leave the VM running
+MODE=boot bash scripts/test-iso.sh
+
+# 2) SSH in and run a manual install (password via stdin)
+ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost
+echo 'aelum' | /shared/aelum-installer-cli --install /dev/vda --filesystem btrfs \
+  --manual-layout '<json below>' --username aelum
+```
+
+The `--manual-layout` JSON is a `ManualLayout` object (`installer/backend/shared/
+types.go`). Each partition row carries `path` (existing device, e.g.
+`/dev/vda1`, or empty to create a brand-new one), `sizeMB` (`0` = use all
+remaining free space), `type` (`"esp"`, `"system"`, or empty to leave it
+untouched), and — for existing partitions — the exact `sizeBytes`.
+
+The exact layout used to test manual mode against the stock 20 GiB virtual
+disk (`/dev/vda` = 21474836480 bytes, `/dev/vda1` EFI 128 MiB vfat,
+`/dev/vda2` Root ~19.9 GiB ext4):
+
+```json
+{
+  "disk": "/dev/vda",
+  "diskSizeMB": 20480,
+  "diskSizeBytes": 21474836480,
+  "partitions": [
+    {"index": 0, "path": "/dev/vda1", "sizeMB": 128, "sizeBytes": 134217728, "existingFstype": "vfat", "type": "esp"},
+    {"index": 1, "path": "/dev/vda2", "sizeMB": 20350, "sizeBytes": 21339553280, "existingFstype": "ext4", "type": "system"}
+  ],
+  "freeSectors": 2014
+}
+```
+
+To test the dualboot-safe *preserve* path, add extra rows with an empty `type`
+(e.g. another OS's existing partition) — those partitions are never formatted,
+mounted, or written to the fstab. Validate the layout before committing to a
+real install by running the same command with `--dry-run` appended.
 
 ## Layout
 
@@ -172,7 +231,7 @@ is used to log in.
 .
 ├── Dockerfile                 # Build toolchain image (archlinux + tooling)
 ├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
-├── Makefile                   # build / image / run / test / stop / attach / clean
+├── Makefile                   # build / image / run / test / test-boot / stop / attach / clean
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
