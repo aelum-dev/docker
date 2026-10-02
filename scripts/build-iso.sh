@@ -30,6 +30,9 @@ rm -rf "$TMP_INSTALLER"
 
 export PATH="$HOME/go/bin:$PATH"
 
+# Refresh the base system and sync database before anything else.
+pacman -Syu --noconfirm
+
 echo "Building installer..."
 cd "$INSTALLER_DIR"
 make build
