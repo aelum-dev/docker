@@ -32,7 +32,9 @@ The built ISO is written to the mounted `output/` directory.
 ## Build
 
 ```bash
-make build
+make run-iso          # launch the latest ISO in output/ in QEMU
+XRES=2560 YRES=1440 make run-iso   # override resolution
+make run-iso-clean    # delete OVMF_VARS.fd (recreated on next run) then launch
 ```
 
 The toolchain image (`aelum-image`) is built from `./Dockerfile` and
@@ -135,8 +137,13 @@ all go to the same R2 folder.
 ## Run (QEMU)
 
 ```bash
+make run-iso          # equivalent to the shell command below
+# or, directly:
 bash scripts/run-iso.sh
 ```
+
+To clear a possibly-corrupt UEFI NVRAM, delete `OVMF_VARS.fd` (it is recreated
+from the system template on next run) with `make run-iso-clean`.
 
 Launches the latest ISO in `output/` in QEMU with:
 
@@ -247,7 +254,7 @@ real install by running the same command with `--dry-run` appended.
 .
 ├── Dockerfile                 # Build toolchain image (archlinux + tooling)
 ├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
-├── Makefile                   # build / image / update / run / test / test-boot / stop / attach / clean
+├── Makefile                   # docker (build / image / update / run / attach / stop / clean) # and qemu (run-iso / run-iso-clean / test / test-boot)
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
