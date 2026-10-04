@@ -9,3 +9,10 @@ vdisk.qcow2
 logs/test-progress.json
 logs/test-run.log
 logs/qemu.log
+
+# Local release secrets (copied from release.env.example). Never commit this.
+/release.env
+
+# Generated staging artifact (produced by publish-iso.sh, committed to the
+# website repo instead of this one). Never commit this.
+/release.ts

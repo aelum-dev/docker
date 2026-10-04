@@ -1,4 +1,4 @@
-.PHONY: help build image update run attach stop clean test test-boot run-iso run-iso-clean
+.PHONY: help build image update run attach stop clean test test-boot run-iso run-iso-clean release
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -45,6 +45,27 @@ clean:
 	docker compose stop aelum-shell 2>/dev/null || true
 	docker rm -f aelum aelum-shell 2>/dev/null || true
 	docker volume prune -f
+
+# ===========================================================================
+# Release — sign, publish to Cloudflare R2, and update the website links
+# ===========================================================================
+
+# Full release pipeline: sign the ISO, upload it to Cloudflare R2, then push the
+# updated download links to the website repo. All credentials come from the
+# environment (see RELEASE.md for the full list). The tag defaults to today
+# (vYYYY.MM.DD) or pin it with VERSION=.
+#
+#   make release                       # release newest ISO in output/ as v<today>
+#   make release VERSION=2026.10.04    # pin the tag
+#   make release ISO=output/foo.iso    # release a specific ISO
+
+RELEASE_TAG := $(if $(VERSION),v$(VERSION),v$(shell date +%Y.%m.%d))
+
+# All of the release logic (load secrets, validate, sign, upload, update the
+# website) lives in a single shell wrapper so the sourced env vars are visible
+# throughout. Pass the tag as $1; the wrapper defaults to today if omitted.
+release:
+	@./scripts/release.sh "$(RELEASE_TAG)"
 
 # ===========================================================================
 # QEMU — boot the built ISO (runs on the host, needs KVM + sshpass)

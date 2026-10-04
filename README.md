@@ -102,10 +102,50 @@ The resulting ISO appears in `output/`, e.g. `output/aelum-YYYY.MM.DD-x86_64.iso
 ## Releases
 
 The ISO is too large for GitLab, so releases are published to a Cloudflare
-[R2](https://developers.cloudflare.com/r2/) bucket and the download link is
-updated on the website by hand. Two scripts handle this locally:
+[R2](https://developers.cloudflare.com/r2/) bucket, and the download links on
+the website are updated **automatically** — no hand-editing. The pieces:
 
-**Sign & checksum** — `scripts/release-iso.sh`:
+- **`scripts/release-iso.sh`** — sign + checksum the ISO (GPG detached signature,
+  SHA-256/SHA-512, exported public key). Verifies everything before printing the
+  assets to upload.
+- **`scripts/publish-iso.sh`** — upload the assets to the `aelum` R2 bucket
+  (`public-read`), then build and upload **`latest.json`** (machine-readable
+  release metadata) to the bucket root (served publicly), and generate the
+  website's **`release.ts`**.
+- **`scripts/publish-website.sh`** — commit the generated `release.ts` to the
+  [website](https://gitlab.com/aelum/website) repo's `main` branch, which triggers
+  GitLab Pages to redeploy with the fresh download links.
+
+### How to run (local)
+
+The whole release runs locally — there is **no CI job** (the ISO is too large for
+GitLab and the release needs your keys + your local ISO). Build the ISO first,
+then:
+
+```bash
+cp release.env.example release.env   # gitignored — never commit this
+$EDITOR release.env                  # fill in your R2 / GPG / website values
+make build                           # → output/*.iso
+make release                         # sign → upload to R2 → update website links
+```
+
+All credentials are read from `release.env` (see [RELEASE.md](RELEASE.md)) and are
+never committed, so the same scripts run from any machine. Configure these in
+`release.env`:
+
+```bash
+R2_ACCOUNT_ID / R2_ACCESS_KEY / R2_SECRET_KEY   # R2 Object Read & Write on `aelum`
+AELUM_GPG_KEY                                    # release signing key
+AELUM_GPG_PRIVATE_KEY_B64                        # base64 armored private key (headless signing)
+GPG_PASSPHRASE                                   # passphrase for the signing key
+AELUM_SIGNING_UID / _FP / _FP_TOP / _FP_BOT / _EXPIRES
+WEBSITE_DEPLOY_TOKEN                             # GitLab project access token (Owner), write access to the website repo
+R2_PUBLIC_BASE                                   # optional CDN domain for asset URLs (default cdn.aelum.dev)
+```
+
+### Sign & checksum only
+
+`scripts/release-iso.sh`:
 
 ```bash
 export AELUM_GPG_KEY='0x1234ABCD'     # or 'Name <email>'
@@ -132,7 +172,21 @@ export R2_SECRET_KEY=zzz
 Builds a throwaway rclone config from the env vars (nothing is written to your
 main `rclone.conf`) and uploads to the `aelum` bucket as `public-read`. The
 release assets (`*.iso`, `*.sha256`, `*.sha512`, `*.asc`, `aelum-release-key.asc`)
-all go to the same R2 folder.
+all go to the same R2 folder. It then uploads `latest.json` to the bucket root
+and writes `release.ts` to the project root.
+
+**Update the website** — after publishing, commit the generated `release.ts` to
+the website repo:
+
+```bash
+export WEBSITE_DEPLOY_TOKEN=xxxx
+./scripts/publish-website.sh   # pushes src/lib/release.ts to the website repo → GitLab Pages rebuilds
+```
+
+Assets are served directly from R2 (the bucket has public reads) with
+`cdn.aelum.dev` CNAME'd to the bucket endpoint — no Worker is needed. See
+[RELEASE.md](RELEASE.md) for the full secret list and run-from-any-machine
+instructions.
 
 ## Run (QEMU)
 
@@ -259,8 +313,11 @@ real install by running the same command with `--dry-run` appended.
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
 │   ├── test-iso.sh            # headless QEMU + installer-cli test
-│   ├── release-iso.sh         # sign + checksum the ISO for release
-│   └── publish-iso.sh         # upload the ISO to Cloudflare R2
+│   ├── release.sh             # entry point: load secrets, sign, upload, update site
+│   ├── release-iso.sh         # sign + checksum the ISO (GPG) for release
+│   ├── build-release-metadata.sh  # build latest.json + website release.ts
+│   ├── publish-iso.sh         # upload ISO + sidecars + latest.json to R2
+│   └── publish-website.sh     # push release.ts to the website repo
 ├── logs/                      # test artifacts (test-progress.json, test-run.log)
 ├── output/                    # Built ISO files (bind-mounted from host)
 ├── OVMF_VARS.fd               # UEFI variables for QEMU
