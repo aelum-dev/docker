@@ -205,7 +205,7 @@ Launches the latest ISO in `output/` in QEMU with:
 - 4 cores, 4GB RAM
 - VirtIO GPU with GL (virgl), 1920×1080 (override with `XRES`/`YRES`)
 - OVMF UEFI firmware (`OVMF_VARS.fd`; created from the system template if missing)
-- 16G VirtIO virtual disk (`vdisk.qcow2`; created if missing)
+- 20G VirtIO virtual disk (`vdisk.qcow2`; created if missing)
 - Shared directory (`$HOME/Projects/shared`, mapped as `shared`)
 - User-mode networking with SSH forwarded to host port 2222
 

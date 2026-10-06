@@ -41,8 +41,8 @@ fi
 # --- Virtual disk ---
 VDISK="$PROFILE_DIR/vdisk.qcow2"
 if [ ! -f "$VDISK" ]; then
-    echo "Creating virtual disk: $VDISK (16G) ..."
-    qemu-img create -f qcow2 "$VDISK" 16G
+    echo "Creating virtual disk: $VDISK (20G) ..."
+    qemu-img create -f qcow2 "$VDISK" 20G
 fi
 
 # --- Display resolution ---
