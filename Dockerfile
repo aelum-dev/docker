@@ -11,6 +11,11 @@ RUN pacman -Syu --noconfirm \
         go nodejs-lts-jod npm \
         gtk3 webkit2gtk-4.1 libsoup3 \
         grub memtest86+ \
-    && pacman -Sc --noconfirm
+    && pacman -Sc --noconfirm \
+    # Arch's shipped go (go1.27.x, custom -X:nodwarf5 build) has a go/types bug
+    # that crashes wails' `go list -export` binding generation with
+    # "internal error: package \"regexp\" without types was imported".
+    # The module pins go 1.26.0; force that official toolchain so wails build works.
+    && go env -w GOTOOLCHAIN=go1.26.0
 
 WORKDIR /app
