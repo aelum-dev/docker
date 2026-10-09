@@ -32,9 +32,9 @@ The built ISO is written to the mounted `output/` directory.
 ## Build
 
 ```bash
-make run-iso          # launch the latest ISO in output/ in QEMU
-XRES=2560 YRES=1440 make run-iso   # override resolution
-make run-iso-clean    # delete OVMF_VARS.fd (recreated on next run) then launch
+make run          # launch the latest ISO in output/ in QEMU
+XRES=2560 YRES=1440 make run   # override resolution
+make run-clean    # delete OVMF_VARS.fd (recreated on next run) then launch
 ```
 
 The toolchain image (`aelum-image`) is built from `./Dockerfile` and
@@ -85,7 +85,7 @@ docker compose build --no-cache`.)
 To debug or work interactively:
 
 ```bash
-make run        # start an interactive build container (aelum-shell)
+make dev        # start an interactive build container (aelum-shell)
 make attach     # attach to it later
 make stop       # stop the container
 make clean      # stop + remove containers and prune volumes
@@ -191,13 +191,13 @@ instructions.
 ## Run (QEMU)
 
 ```bash
-make run-iso          # equivalent to the shell command below
+make run          # equivalent to the shell command below
 # or, directly:
 bash scripts/run-iso.sh
 ```
 
 To clear a possibly-corrupt UEFI NVRAM, delete `OVMF_VARS.fd` (it is recreated
-from the system template on next run) with `make run-iso-clean`.
+from the system template on next run) with `make run-clean`.
 
 Launches the latest ISO in `output/` in QEMU with:
 
@@ -308,7 +308,7 @@ real install by running the same command with `--dry-run` appended.
 .
 ├── Dockerfile                 # Build toolchain image (archlinux + tooling)
 ├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
-├── Makefile                   # docker (build / image / update / run / attach / stop / clean) # and qemu (run-iso / run-iso-clean / test / test-boot)
+├── Makefile                   # docker (build / image / update / dev / attach / stop / clean) # and qemu (run / run-clean / vm-clean / test / test-boot)
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
