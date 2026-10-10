@@ -27,6 +27,7 @@ USERNAME="${USERNAME:-aelum}"              # account created by the installer (a
 USER_PASS="${USER_PASS:-aelum}"            # password for that account (auto mode)
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
+FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
 QEMU_QVM="${QEMU_QVM:-1}"                  # 1 = use -enable-kvm -cpu host
 QEMU_EXTRA="${QEMU_EXTRA:-}"               # extra qemu-system-x86_64 args
 
@@ -71,6 +72,7 @@ command -v sshpass          >/dev/null 2>&1 || fail "sshpass not found (apt/dnf 
 command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ -n "$ISO" ] && [ -f "$ISO" ] || fail "no ISO found in $PROFILE_DIR/output/ (build it first with 'make build')"
 [ "$MODE" = "auto" ] || [ "$MODE" = "boot" ] || fail "MODE must be 'auto' or 'boot' (got '$MODE')"
+[ "$FILESYSTEM" = "ext4" ] || [ "$FILESYSTEM" = "btrfs" ] || fail "FILESYSTEM must be 'ext4' or 'btrfs' (got '$FILESYSTEM')"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
 kill_stale
@@ -195,10 +197,10 @@ log "Using CLI baked into the ISO"
 
 # The CLI reads the user *password* from stdin; the username comes from
 # --username.
-log "Running installer install on $DISK_PATH ..."
+log "Running installer install on $DISK_PATH ($FILESYSTEM) ..."
 printf '%s\n' "$USER_PASS" \
     | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-    "${INSTALLER_BIN} --install ${DISK_PATH} --username ${USERNAME}" 2> "$PROGRESS_JSON"
+    "${INSTALLER_BIN} --install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME}" 2> "$PROGRESS_JSON"
 RC=$?
 
 if [ "$RC" -ne 0 ]; then

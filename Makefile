@@ -34,7 +34,7 @@ help:
 	@echo "  make vm-clean       Delete vdisk.qcow2 + OVMF_VARS.fd (fresh test disk)"
 	@echo ""
 	@echo "Headless test (SSH + installer CLI):"
-	@echo "  make test             Boot, run a full install, stop (MODE=auto)"
+	@echo "  make test             Boot, run a full install, stop (MODE=auto, FILESYSTEM=btrfs)"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 
 # ===========================================================================
