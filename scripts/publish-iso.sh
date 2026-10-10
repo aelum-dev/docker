@@ -50,11 +50,21 @@ set -euo pipefail
 # Scripts live in scripts/; the project root (output/) is the parent dir.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Load local secrets (gitignored) if present, so `make release-upload` works
+# standalone the same way it does through release.sh.
+if [ -f "$ROOT_DIR/release.env" ]; then
+    set -a; . "$ROOT_DIR/release.env"; set +a
+fi
+
 R2_BUCKET="${R2_BUCKET:-aelum}"
-R2_ACCOUNT_ID="${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID (top-right of Cloudflare dashboard)}"
+R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
+R2_ACCESS_KEY="${R2_ACCESS_KEY:-}"
+R2_SECRET_KEY="${R2_SECRET_KEY:-}"
+if [[ -z "${R2_ACCOUNT_ID}${R2_ACCESS_KEY}${R2_SECRET_KEY}" ]]; then
+    echo "ERROR: required R2 credentials not set. Copy release.env.example to release.env (see RELEASE.md), or export R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY." >&2
+    exit 1
+fi
 R2_ENDPOINT="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com}"
-R2_ACCESS_KEY="${R2_ACCESS_KEY:?set R2_ACCESS_KEY (Access Key ID from API token)}"
-R2_SECRET_KEY="${R2_SECRET_KEY:?set R2_SECRET_KEY (Secret Access Key from API token)}"
 
 TAG="${1:?usage: publish-iso.sh <tag> [iso-path]}"
 ISO_PATH="${2:-$(ls -1t "$ROOT_DIR"/output/*.iso 2>/dev/null | head -1)}"

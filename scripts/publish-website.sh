@@ -30,6 +30,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Load local secrets (gitignored) if present, so `make release-website` works
+# standalone the same way it does through release.sh.
+if [ -f "$ROOT_DIR/release.env" ]; then
+    set -a; . "$ROOT_DIR/release.env"; set +a
+fi
+
 WEBSITE_REPO="${WEBSITE_REPO:-https://gitlab.com/aelum/website.git}"
 RELEASE_TS="${RELEASE_TS:-$ROOT_DIR/release.ts}"
 BRANCH="${WEBSITE_BRANCH:-main}"

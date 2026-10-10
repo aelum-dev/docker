@@ -26,7 +26,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
+
+# Load local secrets (gitignored) if present, so `make release-sign` works
+# standalone the same way it does through release.sh.
+if [ -f "$ROOT_DIR/release.env" ]; then
+    set -a; . "$ROOT_DIR/release.env"; set +a
+fi
 
 # ── Config ────────────────────────────────────────────────────────────────────
 AELUM_GPG_KEY="${AELUM_GPG_KEY:-}"          # e.g. 0x1234ABCD or "My Name <me@example>"
@@ -45,6 +52,7 @@ DIR="$(dirname "$ISO")"
 command -v gpg >/dev/null 2>&1 || { echo "Error: gpg not found." >&2; exit 1; }
 if [[ -z "$AELUM_GPG_KEY" ]]; then
     echo "Error: set AELUM_GPG_KEY (a key id or 'Name <email>')." >&2
+    echo "  Copy release.env.example to release.env (see RELEASE.md), or export it." >&2
     echo "  List keys:  gpg --list-secret-keys --keyid-format=long" >&2
     exit 1
 fi
