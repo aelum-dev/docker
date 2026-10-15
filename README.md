@@ -236,11 +236,16 @@ software emulation when `/dev/kvm` is absent). Live-ISO `root` (empty password)
 is used to log in.
 
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
-  `SSH_PORT`, `DISK_PATH`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`, `SHARED_DIR`.
+  `SSH_PORT`, `DISK_PATH`, `FILESYSTEM`, `LUKS`, `LUKS_PASS`, `LVM`, `MANUAL`,
+  `VERIFY`, `SHARED_INSTALLER`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`,
+  `SHARED_DIR`.
 - Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
-  progress in auto mode), `qemu.log` (QEMU output).
-- Also exposed as make targets: `make test` (auto) and `make test-boot` (boot).
-- `make test` is equivalent to `MODE=auto ./scripts/test-iso.sh`; `make test-boot` to `MODE=boot ./scripts/test-iso.sh`.
+  progress in auto mode), `qemu.log` (QEMU output), `matrix/` (per-cell logs).
+- Also exposed as make targets: `make test` (runs **every** install variation —
+  the full matrix), `make test-one` (a single install, flag-driven), and
+  `make test-boot` (boot). `make test-one` forwards `FILESYSTEM` / `LUKS` /
+  `LVM` / `MANUAL` / `VERIFY` to the script, so `make test-one LVM=1` and
+  `LVM=1 make test-one` both work.
 
 ### Testing the installer CLI
 
@@ -254,6 +259,8 @@ exercised against a clean target:
 
 ```bash
 MODE=auto bash scripts/test-iso.sh
+# or, via make (single install):
+make test-one
 # or pin the filesystem / account:
 USERNAME=aelum USER_PASS=aelum DISK_PATH=/dev/vda MODE=auto bash scripts/test-iso.sh
 ```
@@ -302,6 +309,67 @@ To test the dualboot-safe *preserve* path, add extra rows with an empty `type`
 mounted, or written to the fstab. Validate the layout before committing to a
 real install by running the same command with `--dry-run` appended.
 
+`MANUAL=1` automates the manual path end to end: it builds a fresh-disk layout
+(a 512 MiB ESP plus a System partition filling the rest) from the guest's
+geometry and drives `--manual-layout` itself, so no hand-written JSON is needed.
+
+### LVM and the full install matrix
+
+Every supported layout can be exercised without the GUI. `test-iso.sh` reads
+these from the environment and passes the matching flags to the CLI:
+
+| Variable | Values | Effect |
+|----------|--------|--------|
+| `FILESYSTEM` | `btrfs` (default) \| `ext4` | root filesystem (on the LVs when `LVM=1`) |
+| `LUKS` | `0` (default) \| `1` | LUKS2-encrypt the root partition |
+| `LVM` | `0` (default) \| `1` | place root+home on logical volumes in the `aelum` VG |
+| `MANUAL` | `0` (default) \| `1` | dualboot-safe manual partitioning (512 MiB ESP + System) |
+| `VERIFY` | `1` (default) \| `0` | inspect the installed system after the install |
+
+```bash
+LVM=1 make test-one                       # auto + btrfs + LVM
+LVM=1 FILESYSTEM=ext4 make test-one       # auto + ext4 + LVM
+LUKS=1 LVM=1 make test-one                # auto + LUKS + LVM
+MANUAL=1 LVM=1 make test-one              # manual + LVM
+```
+
+After a successful install, `scripts/verify-installed.sh` runs **inside the
+guest** and independently re-inspects the disk: it re-opens LUKS, re-activates
+the `aelum` VG, mounts the installed root read-only, and asserts
+
+- the VG exists with exactly two LVs (`root`, `home`) and the PV is the system
+  partition (or the LUKS mapper);
+- the root and home filesystems match `FILESYSTEM`;
+- `/etc/fstab` mounts `/`, `/boot`, and (LVM or btrfs) `/home` correctly, with
+  the right UUIDs and the `@home` subvolume where applicable;
+- `/etc/mkinitcpio.conf` `HOOKS` include `lvm2` (LVM) and an encrypt hook (LUKS);
+- the systemd-boot entry roots at `/dev/mapper/aelum-root` (LVM), carries
+  `rd.luks.name=` (LUKS), and `rootflags=subvol=@` only for btrfs.
+
+`verify-installed.sh` never calls the installer, so it validates the on-disk
+result rather than the code that produced it. Set `VERIFY=0` to skip it.
+
+**Every variation by default.** `make test` runs the whole matrix — auto/manual
+× btrfs/ext4 × LUKS off/on × LVM off/on (16 cells) — each with a fresh QEMU
+boot, install, and verification, then prints a pass/fail summary. Narrow it
+while iterating:
+
+```bash
+make test                                     # all 16 variations
+make test-lvm                                 # only the LVM variations (8)
+LVMS=1 make test                              # same as test-lvm
+MODES=auto FILESYSTEMS=ext4 LVMS=1 make test
+SHARED_INSTALLER=1 make test                  # drive installs from /shared
+```
+
+(`make test-matrix` is kept as an explicit alias for `make test`, and
+`make test-one` runs a single install.)
+
+The dimensions are `MODES` (`auto manual`), `FILESYSTEMS` (`btrfs ext4`),
+`LUKSES` (`0 1`), and `LVMS` (`0 1`). Per-cell logs land in `logs/matrix/`. A
+full desktop install is heavy, so the whole matrix takes a long time — narrow
+the lists while iterating.
+
 ## Layout
 
 ```
@@ -313,6 +381,8 @@ real install by running the same command with `--dry-run` appended.
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
 │   ├── test-iso.sh            # headless QEMU + installer-cli test
+│   ├── test-matrix.sh         # run the full install matrix, print a summary
+│   ├── verify-installed.sh    # independent post-install inspection (in the guest)
 │   ├── release.sh             # entry point: load secrets, sign, upload, update site
 │   ├── release-iso.sh         # sign + checksum the ISO (GPG) for release
 │   ├── build-release-metadata.sh  # build latest.json + website release.ts

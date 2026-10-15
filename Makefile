@@ -1,6 +1,6 @@
 .PHONY: help build image update dev attach stop clean \
         release release-sign release-upload release-website \
-        run run-clean vm-clean test test-boot
+        run run-clean vm-clean test test-one test-boot test-matrix test-lvm
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -34,7 +34,13 @@ help:
 	@echo "  make vm-clean       Delete vdisk.qcow2 + OVMF_VARS.fd (fresh test disk)"
 	@echo ""
 	@echo "Headless test (SSH + installer CLI):"
-	@echo "  make test             Boot, run a full install, stop (MODE=auto, FILESYSTEM=btrfs)"
+	@echo "  make test             Run EVERY install variation (auto/manual x btrfs/ext4 x LUKS x LVM)"
+	@echo "  make test LVMS=1      Narrow the matrix (only the LVM cells)"
+	@echo "  make test-one         Run a single install, stop (MODE=auto, FILESYSTEM=btrfs)"
+	@echo "  make test-one LUKS=1  single LUKS2-encrypted install"
+	@echo "  make test-one LVM=1   single install on LVM logical volumes"
+	@echo "  make test-one MANUAL=1  single dualboot-safe manual install"
+	@echo "  make test-lvm         Run only the LVM cells of the matrix"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 
 # ===========================================================================
@@ -144,14 +150,52 @@ vm-clean:
 # QEMU — headless test (boot + drive aelum-installer-cli over SSH)
 # ===========================================================================
 
-## auto: boot, run a full install, stop (default)
-##   SSH_PORT=2230 make test
-##   LUKS=1 make test                 # encrypt the root partition with LUKS2
-#   LUKS_PASS=... make test           # set the LUKS passphrase (default aelum-luks)
-##   SHARED_INSTALLER=1 make test     # drive the install with /shared/aelum-installer-cli
-test:
-	@MODE=auto ./scripts/test-iso.sh
+## test: run EVERY install variation — auto/manual x btrfs/ext4 x LUKS x LVM
+##       (16 cells by default), each with an independent post-install check.
+##       This is heavy: every cell boots QEMU and does a full desktop install.
+##   make test                              # all 16 variations
+##   make test LVMS=1                        # just the LVM variations
+##   make test MODES=auto FILESYSTEMS=ext4 LVMS=1
+##   VERIFY=0 make test                      # skip the post-install inspection
+##   SHARED_INSTALLER=1 make test            # drive installs from /shared
+test: test-matrix
+
+## one: run a SINGLE install with the given flags, then stop (for debugging one path)
+##   SSH_PORT=2230 make test-one
+##   LUKS=1 make test-one                 # encrypt the root partition with LUKS2
+##   LUKS_PASS=... make test-one          # LUKS passphrase (default aelum-luks)
+##   LVM=1 make test-one                  # place root+home on LVM logical volumes
+##   MANUAL=1 make test-one               # dualboot-safe manual partitioning
+##   FILESYSTEM=ext4 make test-one        # root filesystem (btrfs | ext4)
+##   VERIFY=0 make test-one               # skip the post-install inspection
+##   SHARED_INSTALLER=1 make test-one     # drive the install with /shared/aelum-installer-cli
+test-one:
+	@MODE=auto \
+	 FILESYSTEM="$(FILESYSTEM)" LUKS="$(LUKS)" LVM="$(LVM)" MANUAL="$(MANUAL)" \
+	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
+	 LUKS_PASS="$(LUKS_PASS)" USER_PASS="$(USER_PASS)" \
+	 USERNAME="$(USERNAME)" SSH_PORT="$(SSH_PORT)" \
+	 ./scripts/test-iso.sh
 
 ## boot: boot headless with /shared mounted; leave VM running
 test-boot:
 	@MODE=boot ./scripts/test-iso.sh
+
+## matrix: run every install combination and print a pass/fail summary
+##       (this is what `make test` runs; kept as an explicit alias)
+##   make test-matrix                              # all 16 combinations
+##   make test-matrix LVMS=1                        # only the LVM cells
+##   make test-matrix MODES=auto FILESYSTEMS=ext4 LVMS=1
+##   SHARED_INSTALLER=1 make test-matrix            # drive installs from /shared
+test-matrix:
+	@MODES="$(MODES)" FILESYSTEMS="$(FILESYSTEMS)" LUKSES="$(LUKSES)" LVMS="$(LVMS)" \
+	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
+	 ./scripts/test-matrix.sh
+
+## lvm: run every LVM cell (mode x fs x luks), each with verification
+##   make test-lvm
+##   make test-lvm MODES=auto FILESYSTEMS=ext4
+test-lvm:
+	@MODES="$(MODES)" FILESYSTEMS="$(FILESYSTEMS)" LUKSES="$(LUKSES)" LVMS=1 \
+	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
+	 ./scripts/test-matrix.sh

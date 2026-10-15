@@ -9,6 +9,7 @@ vdisk.qcow2
 logs/test-progress.json
 logs/test-run.log
 logs/qemu.log
+logs/matrix/
 
 # Local release secrets (copied from release.env.example). Never commit this.
 /release.env

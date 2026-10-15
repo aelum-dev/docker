@@ -10,6 +10,17 @@
 #               password then the LUKS passphrase; default passphrase
 #               LUKS_PASS=aelum-luks). The installer CLI already supports --luks.
 #
+#               LVM=1   place root and home on LVM logical volumes in the `aelum`
+#               volume group (passes --lvm). Composes with LUKS and either
+#               filesystem (btrfs with subvolumes, or ext4).
+#
+#               MANUAL=1 use dualboot-safe manual partitioning: a 512 MiB ESP plus
+#               a System partition that fills the rest, driven via
+#               --manual-layout. Exercises the manual install path end to end.
+#
+#               VERIFY=0 skip the post-install inspection of the installed system
+#               (verify-installed.sh runs it by default when VERIFY=1).
+#
 #   MODE=boot   Boot the ISO headless, mount the host shared dir at /shared in
 #               the guest, and leave it running so you can SSH in and launch the
 #               freshly built installer from /shared. QEMU is detached and
@@ -39,6 +50,9 @@ LUKS_PASS="${LUKS_PASS:-aelum-luks}"       # passphrase for the LUKS root partit
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
 FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
+LVM="${LVM:-0}"                            # place root/home on LVM logical volumes: 0 | 1
+MANUAL="${MANUAL:-0}"                      # use manual (dualboot-safe) partitioning: 0 | 1
+VERIFY="${VERIFY:-1}"                      # independently inspect the installed system after install: 0 | 1
 QEMU_QVM="${QEMU_QVM:-1}"                  # 1 = use -enable-kvm -cpu host
 QEMU_EXTRA="${QEMU_EXTRA:-}"               # extra qemu-system-x86_64 args
 
@@ -85,7 +99,10 @@ command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ "$MODE" = "auto" ] || [ "$MODE" = "boot" ] || fail "MODE must be 'auto' or 'boot' (got '$MODE')"
 [ "$FILESYSTEM" = "ext4" ] || [ "$FILESYSTEM" = "btrfs" ] || fail "FILESYSTEM must be 'ext4' or 'btrfs' (got '$FILESYSTEM')"
 [ "$LUKS" = "0" ] || [ "$LUKS" = "1" ] || fail "LUKS must be '0' or '1' (got '$LUKS')"
-[ "$LUKS" = "1" ] || [ -n "$LUKS_PASS" ] || fail "LUKS_PASS must be set when LUKS=1"
+[ "$LUKS" = "0" ] || [ -n "$LUKS_PASS" ] || fail "LUKS_PASS must be set when LUKS=1"
+[ "$LVM" = "0" ] || [ "$LVM" = "1" ] || fail "LVM must be '0' or '1' (got '$LVM')"
+[ "$MANUAL" = "0" ] || [ "$MANUAL" = "1" ] || fail "MANUAL must be '0' or '1' (got '$MANUAL')"
+[ "$VERIFY" = "0" ] || [ "$VERIFY" = "1" ] || fail "VERIFY must be '0' or '1' (got '$VERIFY')"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
 kill_stale
@@ -129,6 +146,21 @@ wait_for_ssh() {
         sleep 4
     done
     fail "sshd did not become available"
+}
+
+# Emit a manual-layout JSON for a fresh disk: a 512 MiB ESP plus a System
+# partition that consumes the rest. Used by MANUAL=1 to exercise the manual
+# (dualboot-safe) install path headlessly. The geometry is read from the guest
+# so the sector math matches what the installer sees.
+build_manual_layout() {
+    ssh_root "DISK='$DISK_PATH' bash -s" <<'EOS'
+set -e
+bytes=$(blockdev --getsize64 "$DISK")
+ss=$(blockdev --getss "$DISK")
+mib=$((1024 * 1024))
+printf '{"disk":"%s","diskSizeMB":%s,"diskSizeBytes":%s,"sectorSizeBytes":%s,"freeSectors":%s,"partitions":[{"index":0,"path":"","sizeMB":512,"type":"esp"},{"index":1,"path":"","sizeMB":0,"type":"system"}]}\n' \
+    "$DISK" "$((bytes / mib))" "$bytes" "$ss" "$((bytes / ss))"
+EOS
 }
 
 # --- Boot QEMU headless ------------------------------------------------------
@@ -230,19 +262,33 @@ else
     log "Using CLI baked into the ISO"
 fi
 
-# The CLI reads the user *password* from stdin; the username comes from
-# --username.
-log "Running installer install on $DISK_PATH ($FILESYSTEM)"
+# Assemble the installer arguments shared by every path. The CLI reads the user
+# *password* from stdin; the username comes from --username.
+INSTALLER_ARGS=(--install "$DISK_PATH" --filesystem "$FILESYSTEM" --username "$USERNAME")
+if [ "$LUKS" = "1" ]; then
+    INSTALLER_ARGS+=(--luks)
+fi
+if [ "$LVM" = "1" ]; then
+    INSTALLER_ARGS+=(--lvm)
+fi
+if [ "$MANUAL" = "1" ]; then
+    MANUAL_LAYOUT="$(build_manual_layout)"
+    [ -n "$MANUAL_LAYOUT" ] || fail "could not build a manual layout for $DISK_PATH"
+    log "Manual layout: $MANUAL_LAYOUT"
+    # Single-quote the JSON so the remote shell passes it through verbatim (JSON
+    # contains double quotes but no single quotes).
+    INSTALLER_ARGS+=(--manual-layout "'$MANUAL_LAYOUT'")
+fi
+
+log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL)"
 if [ "$LUKS" = "1" ]; then
     log "LUKS encryption enabled (root partition will be LUKS2-encrypted)"
-    INSTALLER_ARGS=(--install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME} --luks)
     # CLI reads the account password first, then the LUKS passphrase, both from
     # stdin — pipe them in that order.
     printf '%s\n%s\n' "$USER_PASS" "$LUKS_PASS" \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
         "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
 else
-    INSTALLER_ARGS=(--install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME})
     printf '%s\n' "$USER_PASS" \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
         "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
@@ -253,5 +299,25 @@ if [ "$RC" -ne 0 ]; then
     fail "installer CLI exited with code $RC (see $PROGRESS_JSON)"
 fi
 log "installer CLI exited 0"
+
+# ── Independent verification of the installed system ─────────────────────────
+# The installer's own VerifySystem step already ran, but it is the same code
+# under test. This re-inspects the disk from outside: it re-opens LUKS,
+# re-activates the VG, mounts the installed root, and asserts the LVM layout,
+# fstab, initramfs hooks, and boot entry match the requested combination.
+if [ "$VERIFY" = "1" ]; then
+    log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
+    if { printf 'FILESYSTEM=%q LUKS=%q LVM=%q LUKS_PASS=%q DISK_PATH=%q\n' \
+             "$FILESYSTEM" "$LUKS" "$LVM" "$LUKS_PASS" "$DISK_PATH"
+          cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
+        | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
+        log "Verification passed"
+    else
+        fail "verification of the installed system failed"
+    fi
+else
+    log "Verification skipped (VERIFY=0)"
+fi
+
 log "SUCCESS (auto test passed). Progress: $PROGRESS_JSON"
 exit 0
