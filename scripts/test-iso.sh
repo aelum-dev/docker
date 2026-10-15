@@ -287,11 +287,11 @@ if [ "$LUKS" = "1" ]; then
     # stdin — pipe them in that order.
     printf '%s\n%s\n' "$USER_PASS" "$LUKS_PASS" \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
+        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> >(tee "$PROGRESS_JSON" >&2)
 else
     printf '%s\n' "$USER_PASS" \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
+        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> >(tee "$PROGRESS_JSON" >&2)
 fi
 RC=$?
 

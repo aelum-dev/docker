@@ -52,7 +52,8 @@ for mode in $MODES; do
                 echo "[$total] $cell"
                 echo "  log: $logfile"
                 echo "================================================================"
-                if MODE="$mode" FILESYSTEM="$fs" LUKS="$luks" LVM="$lvm" \
+                if MODE=auto MANUAL="$([ "$mode" = manual ] && echo 1 || echo 0)" \
+                     FILESYSTEM="$fs" LUKS="$luks" LVM="$lvm" \
                      SHARED_INSTALLER="${SHARED_INSTALLER:-0}" \
                      LUKS_PASS="${LUKS_PASS:-aelum-luks}" \
                      USER_PASS="${USER_PASS:-aelum}" \
