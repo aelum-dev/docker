@@ -6,10 +6,18 @@
 #               (the version baked into the ISO) to do a full automatic install
 #               against the vdisk. QEMU is stopped when the test finishes.
 #
+#               LUKS=1  encrypt the root partition with LUKS2 (pipe the account
+#               password then the LUKS passphrase; default passphrase
+#               LUKS_PASS=aelum-luks). The installer CLI already supports --luks.
+#
 #   MODE=boot   Boot the ISO headless, mount the host shared dir at /shared in
 #               the guest, and leave it running so you can SSH in and launch the
 #               freshly built installer from /shared. QEMU is detached and
 #               survives this script exiting.
+#
+#   SHARED_INSTALLER=1 (auto mode) mount /shared and drive the auto install with
+#               the freshly built installer from /shared instead of the CLI
+#               baked into the ISO.
 #
 # Requirements: qemu-system-x86_64, sshpass, ssh.
 #   KVM is optional: without /dev/kvm, set QEMU_QVM=0.
@@ -22,9 +30,12 @@ PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 MODE="${MODE:-auto}"                       # auto | boot
 SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
+SHARED_INSTALLER="${SHARED_INSTALLER:-0}"          # auto mode: install using /shared/aelum-installer-cli instead of the baked-in one (0 | 1)
 ROOT_PASS="${ROOT_PASS:-}"                 # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
 USERNAME="${USERNAME:-aelum}"              # account created by the installer (auto mode)
 USER_PASS="${USER_PASS:-aelum}"            # password for that account (auto mode)
+LUKS="${LUKS:-0}"                          # encrypt root with LUKS2 in auto install: 0 | 1
+LUKS_PASS="${LUKS_PASS:-aelum-luks}"       # passphrase for the LUKS root partition (LUKS=1)
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
 FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
@@ -73,6 +84,8 @@ command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ -n "$ISO" ] && [ -f "$ISO" ] || fail "no ISO found in $PROFILE_DIR/output/ (build it first with 'make build')"
 [ "$MODE" = "auto" ] || [ "$MODE" = "boot" ] || fail "MODE must be 'auto' or 'boot' (got '$MODE')"
 [ "$FILESYSTEM" = "ext4" ] || [ "$FILESYSTEM" = "btrfs" ] || fail "FILESYSTEM must be 'ext4' or 'btrfs' (got '$FILESYSTEM')"
+[ "$LUKS" = "0" ] || [ "$LUKS" = "1" ] || fail "LUKS must be '0' or '1' (got '$LUKS')"
+[ "$LUKS" = "1" ] || [ -n "$LUKS_PASS" ] || fail "LUKS_PASS must be set when LUKS=1"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
 kill_stale
@@ -135,10 +148,12 @@ QEMU_ARGS=(
     -vnc none
 )
 
-# In boot mode, expose the host shared dir to the guest via a 9p virtfs mount
-# (mirrors run.sh). The live ISO's shared-mount service then mounts it at
-# /shared on boot, so the freshly built installer can be launched from there.
-if [ "$MODE" = "boot" ]; then
+# Expose the host shared dir to the guest via a 9p virtfs mount (mirrors
+# run.sh). The live ISO's shared-mount service then mounts it at /shared on
+# boot, so the freshly built installer can be launched from there. Mounted in
+# boot mode always, and in auto mode when SHARED_INSTALLER=1 so the test can
+# drive the install from /shared instead of the baked-in CLI.
+if [ "$MODE" = "boot" ] || [ "$SHARED_INSTALLER" = "1" ]; then
     [ -d "$SHARED_DIR" ] || fail "MODE=boot but SHARED_DIR not found: $SHARED_DIR"
     QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
 fi
@@ -190,17 +205,48 @@ trap cleanup EXIT
 
 wait_for_ssh
 
-# The test drives the CLI baked into the ISO (using an absolute path so sudo
-# resolves it reliably).
-INSTALLER_BIN="sudo aelum-installer-cli"
-log "Using CLI baked into the ISO"
+# When installing from /shared, wait for the 9p mount to come up so the freshly
+# built installer is available before we launch it (mirrors boot mode).
+if [ "$SHARED_INSTALLER" = "1" ]; then
+    log "Waiting for /shared/aelum-installer-cli to be available ..."
+    shared_ready=0
+    for i in $(seq 1 30); do
+        if ssh_root "test -x /shared/aelum-installer-cli" 2>/dev/null; then
+            log "/shared ready (after ~$((i * 2))s)"
+            shared_ready=1
+            break
+        fi
+        sleep 2
+    done
+    [ "$shared_ready" = "1" ] || fail "/shared/aelum-installer-cli not found after wait (is SHARED_DIR mounted?)"
+fi
+
+# The test drives the CLI (an absolute path so sudo resolves it reliably).
+if [ "$SHARED_INSTALLER" = "1" ]; then
+    INSTALLER_BIN="sudo /shared/aelum-installer-cli"
+    log "Using freshly built CLI from /shared"
+else
+    INSTALLER_BIN="sudo aelum-installer-cli"
+    log "Using CLI baked into the ISO"
+fi
 
 # The CLI reads the user *password* from stdin; the username comes from
 # --username.
-log "Running installer install on $DISK_PATH ($FILESYSTEM) ..."
-printf '%s\n' "$USER_PASS" \
-    | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
-    "${INSTALLER_BIN} --install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME}" 2> "$PROGRESS_JSON"
+log "Running installer install on $DISK_PATH ($FILESYSTEM)"
+if [ "$LUKS" = "1" ]; then
+    log "LUKS encryption enabled (root partition will be LUKS2-encrypted)"
+    INSTALLER_ARGS=(--install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME} --luks)
+    # CLI reads the account password first, then the LUKS passphrase, both from
+    # stdin — pipe them in that order.
+    printf '%s\n%s\n' "$USER_PASS" "$LUKS_PASS" \
+        | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
+        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
+else
+    INSTALLER_ARGS=(--install ${DISK_PATH} --filesystem ${FILESYSTEM} --username ${USERNAME})
+    printf '%s\n' "$USER_PASS" \
+        | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" \
+        "${INSTALLER_BIN} ${INSTALLER_ARGS[*]}" 2> "$PROGRESS_JSON"
+fi
 RC=$?
 
 if [ "$RC" -ne 0 ]; then

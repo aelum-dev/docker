@@ -3,6 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# When set to 1, skip cloning installer/ and live-iso/ from GitLab and use the
+# host repos mounted into the container instead (see `make dev SKIP_REPO_CLONE=1`).
+# This lets you build an ISO from your local, unpushed changes.
+SKIP_REPO_CLONE="${SKIP_REPO_CLONE:-0}"
+
 # Build toolchain (git, base-devel, archiso, go, nodejs, gtk3, webkit2gtk,
 # grub, memtest86+) is provided by the docker image. See ./Dockerfile.
 
@@ -12,10 +17,14 @@ LIVE_ISO_DIR="/app/live-iso"
 TMP_ISO="/tmp/live-iso-clone"
 rm -rf "$TMP_ISO"
 mkdir -p "$LIVE_ISO_DIR"
-echo "Cloning live-iso profile..."
-git clone --depth 1 https://gitlab.com/aelum/live-iso.git "$TMP_ISO"
-cp -a "$TMP_ISO"/* "$TMP_ISO"/.[!.]* "$TMP_ISO"/..?* "$LIVE_ISO_DIR/" 2>/dev/null || true
-rm -rf "$TMP_ISO"
+if [ "$SKIP_REPO_CLONE" = "1" ]; then
+    echo "SKIP_REPO_CLONE=1: using local live-iso repo at $LIVE_ISO_DIR (no git clone)"
+else
+    echo "Cloning live-iso profile..."
+    git clone --depth 1 https://gitlab.com/aelum/live-iso.git "$TMP_ISO"
+    cp -a "$TMP_ISO"/* "$TMP_ISO"/.[!.]* "$TMP_ISO"/..?* "$LIVE_ISO_DIR/" 2>/dev/null || true
+    rm -rf "$TMP_ISO"
+fi
 
 # Clone and build installer
 
@@ -23,10 +32,14 @@ INSTALLER_DIR="/app/installer"
 TMP_INSTALLER="/tmp/installer-clone"
 rm -rf "$TMP_INSTALLER"
 mkdir -p "$INSTALLER_DIR"
-echo "Cloning installer..."
-git clone --depth 1 https://gitlab.com/aelum/installer.git "$TMP_INSTALLER"
-cp -a "$TMP_INSTALLER"/* "$TMP_INSTALLER"/.[!.]* "$TMP_INSTALLER"/..?* "$INSTALLER_DIR/" 2>/dev/null || true
-rm -rf "$TMP_INSTALLER"
+if [ "$SKIP_REPO_CLONE" = "1" ]; then
+    echo "SKIP_REPO_CLONE=1: using local installer repo at $INSTALLER_DIR (no git clone)"
+else
+    echo "Cloning installer..."
+    git clone --depth 1 https://gitlab.com/aelum/installer.git "$TMP_INSTALLER"
+    cp -a "$TMP_INSTALLER"/* "$TMP_INSTALLER"/.[!.]* "$TMP_INSTALLER"/..?* "$INSTALLER_DIR/" 2>/dev/null || true
+    rm -rf "$TMP_INSTALLER"
+fi
 
 export PATH="$HOME/go/bin:$PATH"
 

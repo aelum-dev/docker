@@ -146,6 +146,9 @@ vm-clean:
 
 ## auto: boot, run a full install, stop (default)
 ##   SSH_PORT=2230 make test
+##   LUKS=1 make test                 # encrypt the root partition with LUKS2
+#   LUKS_PASS=... make test           # set the LUKS passphrase (default aelum-luks)
+##   SHARED_INSTALLER=1 make test     # drive the install with /shared/aelum-installer-cli
 test:
 	@MODE=auto ./scripts/test-iso.sh
 
