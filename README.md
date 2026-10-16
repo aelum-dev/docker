@@ -211,6 +211,33 @@ Launches the latest ISO in `output/` in QEMU with:
 
 `OVMF_VARS.fd` and `vdisk.qcow2` are created on first run if absent.
 
+## Boot-time measurement
+
+```bash
+make measure-boot                    # headless (egl-headless GPU)
+DISPLAY_MODE=sdl make measure-boot   # watch the boot live in an SDL window
+DISPLAY_MODE=none make measure-boot  # no GPU: non-graphical chain only
+KEEP=1 make measure-boot             # leave the VM running for follow-up probes
+```
+
+`scripts/measure-boot.sh` boots the ISO in QEMU **with a GPU** (so the graphical
+boot chain actually runs) and pipes `scripts/boot-timing.sh` into the guest over
+SSH. The collector reconstructs a monotonic timeline from `systemd-analyze`,
+systemd unit timestamps and `/proc/<pid>/stat` — nothing is baked into the ISO.
+It prints each component's start time plus the gap that matters:
+
+```
+plymouth-quit (splash dismissed)  ->  installer window mapped
+```
+
+Artifacts land in `logs/boot-timing.log` (raw collector output, including a full
+per-process start-time table) and `logs/boot-timing.json` (machine-readable
+timings). `SSH_PORT`, `WINDOW_TIMEOUT`, `MEM`, `XRES`, `YRES`, `QEMU_EXTRA` and
+`ISO` override the defaults, mirroring `test-iso.sh`.
+
+Use `DISPLAY_MODE=none` when no GPU is available; the compositor will not start,
+so the installer-window row is reported as `n/a`.
+
 ## Test / boot (headless QEMU + installer CLI)
 
 ```bash
@@ -380,6 +407,8 @@ the lists while iterating.
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
+│   ├── measure-boot.sh        # boot-time measurement driver (QEMU + report)
+│   ├── boot-timing.sh         # boot-time collector (runs inside the guest)
 │   ├── test-iso.sh            # headless QEMU + installer-cli test
 │   ├── test-matrix.sh         # run the full install matrix, print a summary
 │   ├── verify-installed.sh    # independent post-install inspection (in the guest)

@@ -6,10 +6,7 @@ OVMF_VARS.fd
 vdisk.qcow2
 
 # test.sh artifacts
-logs/test-progress.json
-logs/test-run.log
-logs/qemu.log
-logs/matrix/
+logs/
 
 # Local release secrets (copied from release.env.example). Never commit this.
 /release.env

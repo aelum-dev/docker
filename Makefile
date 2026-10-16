@@ -1,6 +1,6 @@
 .PHONY: help build image update dev attach stop clean \
         release release-sign release-upload release-website \
-        run run-clean vm-clean test test-one test-boot test-matrix test-lvm
+        run run-clean vm-clean measure-boot test test-one test-boot test-matrix test-lvm
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -32,6 +32,10 @@ help:
 	@echo "  make run          Boot the latest ISO (XRES= YRES= override resolution)"
 	@echo "  make run-clean    Delete OVMF_VARS.fd then boot (fix corrupt NVRAM)"
 	@echo "  make vm-clean       Delete vdisk.qcow2 + OVMF_VARS.fd (fresh test disk)"
+	@echo ""
+	@echo "Boot-time measurement (graphical boot, headless GPU):"
+	@echo "  make measure-boot      Timeline of every boot component -> logs/boot-timing.*"
+	@echo "  DISPLAY_MODE=sdl make measure-boot   Watch the boot live in an SDL window"
 	@echo ""
 	@echo "Headless test (SSH + installer CLI):"
 	@echo "  make test             Run EVERY install variation (auto/manual x btrfs/ext4 x LUKS x LVM)"
@@ -145,6 +149,20 @@ run-clean:
 ## Delete vdisk.qcow2 + OVMF_VARS.fd for a fresh virtual disk / clean NVRAM
 vm-clean:
 	@rm -f vdisk.qcow2 OVMF_VARS.fd
+
+# ===========================================================================
+# QEMU — boot-time measurement (graphical boot, headless GPU)
+# ===========================================================================
+
+## Measure the boot chain: boots the ISO with a GPU and prints a monotonic
+## timeline of every component (kernel → plymouth → greetd → Hyprland →
+## installer), focused on the gap between the splash quitting and the installer
+## appearing. Writes logs/boot-timing.log + logs/boot-timing.json.
+##   make measure-boot                    # headless (egl-headless GPU)
+##   DISPLAY_MODE=sdl make measure-boot   # watch it live in an SDL window
+##   DISPLAY_MODE=none make measure-boot  # no GPU (non-graphical chain only)
+measure-boot:
+	@./scripts/measure-boot.sh
 
 # ===========================================================================
 # QEMU — headless test (boot + drive aelum-installer-cli over SSH)
