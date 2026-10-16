@@ -238,6 +238,32 @@ timings). `SSH_PORT`, `WINDOW_TIMEOUT`, `MEM`, `XRES`, `YRES`, `QEMU_EXTRA` and
 Use `DISPLAY_MODE=none` when no GPU is available; the compositor will not start,
 so the installer-window row is reported as `n/a`.
 
+## Ad-hoc guest probes
+
+`scripts/probe-stall.sh` boots the ISO the same way, but instead of printing a
+report it pipes `GUEST_SCRIPT` (default `scripts/probe-stall-guest.sh`) into the
+guest as root and tees everything to `logs/stall-probe.log`. Use it when a boot
+question needs live state rather than reconstructed timings:
+
+```bash
+bash scripts/probe-stall.sh                    # default guest probe
+DISPLAY_MODE=sdl bash scripts/probe-stall.sh   # watch it while it samples
+STALL_DUR=120 bash scripts/probe-stall.sh      # longer sampler window
+GUEST_SCRIPT=scripts/my-probe.sh bash scripts/probe-stall.sh
+```
+
+The default guest probe prints a one-shot snapshot of the finished boot —
+`systemd-analyze` time / critical-chain / blame, jobs still queued, DRM state,
+mounts — and then samples the live process tree every 0.5 s for `STALL_DUR`
+seconds (default 50): CPU/IO pressure, load average, top CPU, D-state tasks, the
+compositor's `wchan`, and the installer's per-thread CPU. It closes with the full
+`journalctl -b` and `dmesg`. It was written to catch the post-greetd black-screen
+stall, so it is slanted that way, but the snapshot and the sampler are generic
+boot diagnostics.
+
+`ISO`, `SSH_PORT`, `DISPLAY_MODE`, `XRES`, `YRES`, `MEM`, `QEMU_EXTRA` and `LOG`
+override the defaults, mirroring `measure-boot.sh`.
+
 ## Test / boot (headless QEMU + installer CLI)
 
 ```bash
@@ -409,6 +435,8 @@ the lists while iterating.
 │   ├── run-iso.sh             # QEMU launch script
 │   ├── measure-boot.sh        # boot-time measurement driver (QEMU + report)
 │   ├── boot-timing.sh         # boot-time collector (runs inside the guest)
+│   ├── probe-stall.sh         # boot the ISO and run a guest diagnostic over SSH
+│   ├── probe-stall-guest.sh   # that diagnostic (runs inside the guest)
 │   ├── test-iso.sh            # headless QEMU + installer-cli test
 │   ├── test-matrix.sh         # run the full install matrix, print a summary
 │   ├── verify-installed.sh    # independent post-install inspection (in the guest)
