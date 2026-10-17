@@ -341,8 +341,8 @@ remaining free space), `type` (`"esp"`, `"system"`, or empty to leave it
 untouched), and — for existing partitions — the exact `sizeBytes`.
 
 The exact layout used to test manual mode against the stock 20 GiB virtual
-disk (`/dev/vda` = 21474836480 bytes, `/dev/vda1` EFI 128 MiB vfat,
-`/dev/vda2` Root ~19.9 GiB ext4):
+disk (`/dev/vda` = 21474836480 bytes, `/dev/vda1` EFI 512 MiB vfat,
+`/dev/vda2` Root ~19.5 GiB ext4):
 
 ```json
 {
@@ -350,8 +350,8 @@ disk (`/dev/vda` = 21474836480 bytes, `/dev/vda1` EFI 128 MiB vfat,
   "diskSizeMB": 20480,
   "diskSizeBytes": 21474836480,
   "partitions": [
-    {"index": 0, "path": "/dev/vda1", "sizeMB": 128, "sizeBytes": 134217728, "existingFstype": "vfat", "type": "esp"},
-    {"index": 1, "path": "/dev/vda2", "sizeMB": 20350, "sizeBytes": 21339553280, "existingFstype": "ext4", "type": "system"}
+    {"index": 0, "path": "/dev/vda1", "sizeMB": 512, "sizeBytes": 536870912, "existingFstype": "vfat", "type": "esp"},
+    {"index": 1, "path": "/dev/vda2", "sizeMB": 19966, "sizeBytes": 20936900096, "existingFstype": "ext4", "type": "system"}
   ],
   "freeSectors": 2014
 }
