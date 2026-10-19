@@ -16,7 +16,7 @@
 #       --iso output/aelum-2026.08.28-x86_64.iso \
 #       --tag v2026.08.28 \
 #       --bucket aelum \
-#       --public-base https://aelum.gitlab.io \
+#       --public-base https://cdn.aelum.dev \
 #       --signing-uid "Ivan Kornienko <ik.workmail39@gmail.com>" \
 #       --signing-fp "A675F61C22C26FCE187262E448CC48FDFD881E0D" \
 #       --expires 2029-08-27 \

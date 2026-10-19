@@ -14,7 +14,7 @@ ever baking your secrets into the code.
 ```
 
 There is **no CI release job**. Building the ISO produces a multi‑gigabyte file
-GitLab can't host, and the release needs your ISO + your keys — so the whole
+GitHub Releases can't host, and the release needs your ISO + your keys — so the whole
 release runs locally on your machine (or any VM you copy the scripts to).
 
 ## Why your keys are never leaked
@@ -61,8 +61,8 @@ Fill in `release.env`:
 | `AELUM_GPG_KEY` | Release signing key id, or `Name <email>` |
 | `AELUM_GPG_PRIVATE_KEY_B64` | base64 of the armored **private** key (for headless signing) |
 | `GPG_PASSPHRASE` | Passphrase for the signing key |
-| `WEBSITE_DEPLOY_TOKEN` | GitLab **project access token** (Owner role) with read+write on the website repo |
-| `WEBSITE_REPO` | website repo URL (default `https://gitlab.com/aelum/website.git`) |
+| `WEBSITE_DEPLOY_TOKEN` | GitHub **fine-grained PAT** with `Contents: Read and write` on the website repo |
+| `WEBSITE_REPO` | website repo URL (default `https://github.com/aelum-dev/website.git`) |
 | `AELUM_SIGNING_UID` / `_FP` / `_FP_TOP` / `_FP_BOT` / `_EXPIRES` | Signing‑key metadata shown on the website (optional) |
 
 ## Running it
@@ -80,7 +80,7 @@ This runs, in order:
 2. `scripts/publish-iso.sh` — upload the ISO + sidecars to R2 (`public-read`),
    build + upload `latest.json`, and generate the website's `release.ts`.
 3. `scripts/publish-website.sh` — commit `release.ts` to the website repo's
-   `main`; GitLab Pages rebuilds with the fresh links.
+   `main`; GitHub Pages rebuilds with the fresh links.
 
 ## Run from another machine / VM
 
@@ -104,7 +104,7 @@ Your `release.env` is the only machine‑specific file, and it is never committe
 | `scripts/release-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key, and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
 | `scripts/publish-iso.sh` | Uploads the ISO + sidecars to R2 (`public-read`), builds + uploads `latest.json`, and generates the website's `release.ts`. Builds a throwaway rclone config from the env — never touches your main `rclone.conf`. |
 | `scripts/build-release-metadata.sh` | Turns the signed ISO into `latest.json` (R2 manifest) and `release.ts` (website module) from the same source of truth, so the two can't drift. |
-| `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the project access token, or an SSH key as a fallback). GitLab Pages rebuilds automatically. |
+| `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the fine-grained PAT, or an SSH key as a fallback). GitHub Pages rebuilds automatically. |
 
 ## Verifying (for users)
 

@@ -1,5 +1,5 @@
 .PHONY: help build image update dev attach stop clean \
-        release release-sign release-upload release-website \
+        release release-sign release-upload release-website wkd \
         run run-clean vm-clean measure-boot test test-one test-boot test-matrix test-lvm
 
 BUILD_FLAGS:=
@@ -27,6 +27,7 @@ help:
 	@echo "  make release-sign     Sign + checksum the newest ISO in output/"
 	@echo "  make release-upload   Upload assets + latest.json to R2 (TAG= required, ISO= optional)"
 	@echo "  make release-website  Push release.ts to the website repo"
+	@echo "  make wkd              Regenerate the Web Key Directory tree (commit it)"
 	@echo ""
 	@echo "QEMU (host, needs KVM + sshpass):"
 	@echo "  make run          Boot the latest ISO (XRES= YRES= override resolution)"
@@ -122,6 +123,10 @@ release:
 release-sign:
 	@./scripts/release-iso.sh
 
+## Regenerate the WKD tree in the website repo (commit website/public/.well-known)
+wkd:
+	@./scripts/export-wkd.sh
+
 ## Upload assets + latest.json to R2 (TAG= required, ISO= optional)
 ##   make release-upload TAG=v2026.10.04
 release-upload:
@@ -129,7 +134,7 @@ release-upload:
 		echo "ERROR: set TAG= (e.g. make release-upload TAG=v2026.10.04)"; exit 1; fi
 	@./scripts/publish-iso.sh "$(TAG)" "${ISO:-}"
 
-## Push the generated release.ts to the website repo (triggers GitLab Pages)
+## Push the generated release.ts to the website repo (triggers GitHub Pages)
 release-website:
 	@./scripts/publish-website.sh
 

@@ -1,7 +1,7 @@
 # Aelum — Build & Run
 
 This repo contains the **Aelum build and run pipeline**. It turns the
-[Aelum profile](https://gitlab.com/aelum/live-iso) into a bootable,
+[Aelum profile](https://github.com/aelum-dev/live-iso) into a bootable,
 fully offline Arch Linux ISO, and launches it in QEMU for testing.
 
 All building and running of Aelum happens here — the profile repo only
@@ -15,7 +15,7 @@ built from `./Dockerfile` — so it is not reinstalled on every run. `scripts/
 build-iso.sh` runs the rest of the pipeline inside a privileged `archlinux`
 container:
 
-1. Clones the [Aelum profile](https://gitlab.com/aelum/live-iso) and the [Aelum Installer](https://gitlab.com/aelum/installer), and builds the installer binaries
+1. Clones the [Aelum profile](https://github.com/aelum-dev/live-iso) and the [Aelum Installer](https://github.com/aelum-dev/installer), and builds the installer binaries
 2. Downloads every official package needed (via a blank-db `pacman -Syw`, so only the dependency tree is pulled)
 3. Builds the listed AUR packages and pulls each one together with its dependency tree into the offline cache
 4. Assembles an offline mirror (`repo-add`) into the profile's `airootfs`
@@ -101,7 +101,7 @@ The resulting ISO appears in `output/`, e.g. `output/aelum-YYYY.MM.DD-x86_64.iso
 
 ## Releases
 
-The ISO is too large for GitLab, so releases are published to a Cloudflare
+The ISO is too large for GitHub Releases, so releases are published to a Cloudflare
 [R2](https://developers.cloudflare.com/r2/) bucket, and the download links on
 the website are updated **automatically** — no hand-editing. The pieces:
 
@@ -113,13 +113,13 @@ the website are updated **automatically** — no hand-editing. The pieces:
   release metadata) to the bucket root (served publicly), and generate the
   website's **`release.ts`**.
 - **`scripts/publish-website.sh`** — commit the generated `release.ts` to the
-  [website](https://gitlab.com/aelum/website) repo's `main` branch, which triggers
-  GitLab Pages to redeploy with the fresh download links.
+  [website](https://github.com/aelum-dev/website) repo's `main` branch, which triggers
+  GitHub Pages to redeploy with the fresh download links.
 
 ### How to run (local)
 
 The whole release runs locally — there is **no CI job** (the ISO is too large for
-GitLab and the release needs your keys + your local ISO). Build the ISO first,
+GitHub and the release needs your keys + your local ISO). Build the ISO first,
 then:
 
 ```bash
@@ -139,7 +139,7 @@ AELUM_GPG_KEY                                    # release signing key
 AELUM_GPG_PRIVATE_KEY_B64                        # base64 armored private key (headless signing)
 GPG_PASSPHRASE                                   # passphrase for the signing key
 AELUM_SIGNING_UID / _FP / _FP_TOP / _FP_BOT / _EXPIRES
-WEBSITE_DEPLOY_TOKEN                             # GitLab project access token (Owner), write access to the website repo
+WEBSITE_DEPLOY_TOKEN                             # GitHub fine-grained PAT (Contents: read+write) for the website repo
 R2_PUBLIC_BASE                                   # optional CDN domain for asset URLs (default cdn.aelum.dev)
 ```
 
@@ -180,7 +180,7 @@ the website repo:
 
 ```bash
 export WEBSITE_DEPLOY_TOKEN=xxxx
-./scripts/publish-website.sh   # pushes src/lib/release.ts to the website repo → GitLab Pages rebuilds
+./scripts/publish-website.sh   # pushes src/lib/release.ts to the website repo → GitHub Pages rebuilds
 ```
 
 Assets are served directly from R2 (the bucket has public reads) with

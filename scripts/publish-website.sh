@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # publish-website.sh — push the freshly generated release.ts to the website repo
-# so GitLab Pages rebuilds the download links automatically.
+# so GitHub Pages rebuilds the download links automatically.
 #
 # This is the "auto link update" half of the pipeline. The docker release job
 # runs it after the ISO is published to R2:
@@ -9,19 +9,18 @@
 #   1. Reads the generated release.ts (from publish-iso.sh, in the project root).
 #   2. Clones the website repo to a temp dir.
 #   3. Overwrites src/lib/release.ts and commits + pushes to main.
-#   4. The website's GitLab Pages CI reacts to the main push and deploys.
+#   4. The website's GitHub Pages workflow reacts to the main push and deploys.
 #
 # The deployed site itself still makes zero network calls — the new links are
 # baked into the static build.
 #
 # Setup (one time):
-#   1. Create a GitLab **project access token** (Owner role) with
-#      read_repository + write_repository on the website repo:
-#         Settings > Access Tokens > Project Access Tokens.
+#   1. Create a GitHub **fine-grained personal access token** scoped to the
+#      website repo with "Contents: Read and write":
+#         GitHub > Settings > Developer settings > Fine-grained tokens.
 #   2. Export it (or put it in release.env):
-#          export WEBSITE_DEPLOY_TOKEN="glpat-..."
-#          export WEBSITE_TOKEN_USER="gitlab+project-access-token"
-#          export WEBSITE_REPO="https://gitlab.com/aelum/website.git"
+#          export WEBSITE_DEPLOY_TOKEN="github_pat_..."
+#          export WEBSITE_REPO="https://github.com/aelum-dev/website.git"
 #
 # Usage:
 #   scripts/publish-website.sh            # uses ./release.ts in the project root
@@ -37,26 +36,26 @@ if [ -f "$ROOT_DIR/release.env" ]; then
     set -a; . "$ROOT_DIR/release.env"; set +a
 fi
 
-WEBSITE_REPO="${WEBSITE_REPO:-https://gitlab.com/aelum/website.git}"
+WEBSITE_REPO="${WEBSITE_REPO:-https://github.com/aelum-dev/website.git}"
 RELEASE_TS="${RELEASE_TS:-$ROOT_DIR/release.ts}"
 BRANCH="${WEBSITE_BRANCH:-main}"
-# Auth username for the GitLab remote. For a project access token this is
-# literally 'gitlab+project-access-token' (the token authenticates as its own
-# username, not 'oauth2'). Override per-token via WEBSITE_TOKEN_USER.
-WEBSITE_TOKEN_USER="${WEBSITE_TOKEN_USER:-gitlab+project-access-token}"
+# Auth username for the HTTPS remote. GitHub ignores the username for token
+# auth, but 'x-access-token' is the conventional value. Override via
+# WEBSITE_TOKEN_USER if your token requires a real username.
+WEBSITE_TOKEN_USER="${WEBSITE_TOKEN_USER:-x-access-token}"
 
 if [[ ! -f "$RELEASE_TS" ]]; then
   echo "ERROR: no generated release.ts at $RELEASE_TS (run scripts/publish-iso.sh first)." >&2
   exit 1
 fi
 
-# Auth: prefer a GitLab project access token (read+write on the website repo),
-# otherwise fall back to an SSH key (local dev). Either way the push writes to
-# the website repo's main branch.
+# Auth: prefer a GitHub fine-grained PAT (Contents: read+write on the website
+# repo), otherwise fall back to an SSH key (local dev). Either way the push
+# writes to the website repo's main branch.
 if [[ -n "${WEBSITE_DEPLOY_TOKEN:-}" ]]; then
   REMOTE="https://${WEBSITE_TOKEN_USER}:${WEBSITE_DEPLOY_TOKEN}@${WEBSITE_REPO#https://}"
 else
-  # https://gitlab.com/aelum/website.git  ->  git@gitlab.com:aelum/website.git
+  # https://github.com/aelum-dev/website.git  ->  git@github.com:aelum-dev/website.git
   _host="${WEBSITE_REPO#https://}"; _host="${_host#http://}"
   REMOTE="git@${_host/\//:}"
 fi
@@ -87,4 +86,4 @@ fi
 git commit -m "chore: update download links to v${VERSION}" >/dev/null
 echo "==> Pushing to $BRANCH..."
 git push origin "$BRANCH"
-echo "==> Done. GitLab Pages will rebuild with the new links."
+echo "==> Done. GitHub Pages will rebuild with the new links."

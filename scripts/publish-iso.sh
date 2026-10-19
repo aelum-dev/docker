@@ -11,7 +11,7 @@
 #      automatically (see docker/scripts/build-release-metadata.sh).
 #
 # After this runs, trigger the website build (commit release.ts to the website
-# repo's main branch, or run scripts/publish-website.sh) and GitLab Pages will
+# repo's main branch, or run scripts/publish-website.sh) and GitHub Pages will
 # redeploy with the new links.
 #
 # Setup (one time):
