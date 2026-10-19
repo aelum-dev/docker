@@ -14,13 +14,16 @@
 # The deployed site itself still makes zero network calls — the new links are
 # baked into the static build.
 #
-# Setup (one time):
-#   1. Create a GitHub **fine-grained personal access token** scoped to the
-#      website repo with "Contents: Read and write":
+# Auth (pick one):
+#   - Recommended for unattended/CI releases: a GitHub **fine-grained personal
+#     access token** scoped to the website repo with "Contents: Read and write":
 #         GitHub > Settings > Developer settings > Fine-grained tokens.
-#   2. Export it (or put it in release.env):
-#          export WEBSITE_DEPLOY_TOKEN="github_pat_..."
-#          export WEBSITE_REPO="https://github.com/aelum-dev/website.git"
+#     Put it in release.env:
+#         WEBSITE_DEPLOY_TOKEN="github_pat_..."
+#         WEBSITE_REPO="https://github.com/aelum-dev/website.git"
+#   - No PAT? The script falls back to the logged-in `gh` CLI token (the one `gh`
+#     itself uses to push), so a local release works with just `gh auth login`.
+#   - Neither? It falls back to pushing over SSH (your SSH key must be on GitHub).
 #
 # Usage:
 #   scripts/publish-website.sh            # uses ./release.ts in the project root
@@ -49,11 +52,14 @@ if [[ ! -f "$RELEASE_TS" ]]; then
   exit 1
 fi
 
-# Auth: prefer a GitHub fine-grained PAT (Contents: read+write on the website
-# repo), otherwise fall back to an SSH key (local dev). Either way the push
-# writes to the website repo's main branch.
+# Auth: an explicit fine-grained PAT wins; otherwise reuse the logged-in gh CLI
+# token; otherwise fall back to SSH. Either way the push writes to the website
+# repo's main branch.
 if [[ -n "${WEBSITE_DEPLOY_TOKEN:-}" ]]; then
   REMOTE="https://${WEBSITE_TOKEN_USER}:${WEBSITE_DEPLOY_TOKEN}@${WEBSITE_REPO#https://}"
+elif command -v gh >/dev/null 2>&1 && _gh_token="$(gh auth token 2>/dev/null)" && [[ -n "$_gh_token" ]]; then
+  echo "==> WEBSITE_DEPLOY_TOKEN not set; using the gh CLI login ($(gh api user -q .login 2>/dev/null || echo unknown))."
+  REMOTE="https://${WEBSITE_TOKEN_USER}:${_gh_token}@${WEBSITE_REPO#https://}"
 else
   # https://github.com/aelum-dev/website.git  ->  git@github.com:aelum-dev/website.git
   _host="${WEBSITE_REPO#https://}"; _host="${_host#http://}"

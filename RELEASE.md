@@ -61,7 +61,7 @@ Fill in `release.env`:
 | `AELUM_GPG_KEY` | Release signing key id, or `Name <email>` |
 | `AELUM_GPG_PRIVATE_KEY_B64` | base64 of the armored **private** key (for headless signing) |
 | `GPG_PASSPHRASE` | Passphrase for the signing key |
-| `WEBSITE_DEPLOY_TOKEN` | GitHub **fine-grained PAT** with `Contents: Read and write` on the website repo |
+| `WEBSITE_DEPLOY_TOKEN` | GitHub **fine-grained PAT** with `Contents: Read and write` on the website repo (optional — if empty, the logged-in `gh` CLI token is used) |
 | `WEBSITE_REPO` | website repo URL (default `https://github.com/aelum-dev/website.git`) |
 | `AELUM_SIGNING_UID` / `_FP` / `_FP_TOP` / `_FP_BOT` / `_EXPIRES` | Signing‑key metadata shown on the website (optional) |
 

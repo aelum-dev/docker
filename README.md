@@ -139,7 +139,7 @@ AELUM_GPG_KEY                                    # release signing key
 AELUM_GPG_PRIVATE_KEY_B64                        # base64 armored private key (headless signing)
 GPG_PASSPHRASE                                   # passphrase for the signing key
 AELUM_SIGNING_UID / _FP / _FP_TOP / _FP_BOT / _EXPIRES
-WEBSITE_DEPLOY_TOKEN                             # GitHub fine-grained PAT (Contents: read+write) for the website repo
+WEBSITE_DEPLOY_TOKEN                             # GitHub fine-grained PAT (Contents: read+write) for the website repo (empty = use the `gh` CLI login)
 R2_PUBLIC_BASE                                   # optional CDN domain for asset URLs (default cdn.aelum.dev)
 ```
 
