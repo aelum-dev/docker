@@ -171,9 +171,11 @@ export R2_SECRET_KEY=zzz
 
 Builds a throwaway rclone config from the env vars (nothing is written to your
 main `rclone.conf`) and uploads to the `aelum` bucket as `public-read`. The
-release assets (`*.iso`, `*.sha256`, `*.sha512`, `*.asc`, `aelum-release-key.asc`)
-all go to the same R2 folder. It then uploads `latest.json` to the bucket root
-and writes `release.ts` to the project root.
+release assets (`*.iso`, `*.sha256`, `*.sha512`, `*.asc`) all go to the same R2
+folder. The public signing key is served via WKD
+(`https://aelum.dev/.well-known/openpgpkey/`), not as a hosted file. It then
+uploads `latest.json` to the bucket root and writes `release.ts` to the project
+root.
 
 **Update the website** — after publishing, commit the generated `release.ts` to
 the website repo:

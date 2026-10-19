@@ -38,8 +38,8 @@ bucket with `public-read`. `cdn.aelum.dev` is CNAME'd to the bucket endpoint
 ```
 https://cdn.aelum.dev/<tag>/<filename>
 https://cdn.aelum.dev/<tag>/<filename>.sha256|.sha512|.asc
-https://cdn.aelum.dev/<tag>/aelum-release-key.asc
 https://cdn.aelum.dev/aelum/latest.json        ← release manifest
+https://aelum.dev/.well-known/openpgpkey/      ← public signing key (WKD)
 ```
 
 ## Setup (one time, on the machine that will run releases)
@@ -101,7 +101,7 @@ Your `release.env` is the only machine‑specific file, and it is never committe
 
 | Script | What it does |
 |--------|--------------|
-| `scripts/release-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key, and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
+| `scripts/release-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key locally (it is distributed via WKD), and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
 | `scripts/publish-iso.sh` | Uploads the ISO + sidecars to R2 (`public-read`), builds + uploads `latest.json`, and generates the website's `release.ts`. Builds a throwaway rclone config from the env — never touches your main `rclone.conf`. |
 | `scripts/build-release-metadata.sh` | Turns the signed ISO into `latest.json` (R2 manifest) and `release.ts` (website module) from the same source of truth, so the two can't drift. |
 | `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the fine-grained PAT, or an SSH key as a fallback). GitHub Pages rebuilds automatically. |
@@ -111,8 +111,10 @@ Your `release.env` is the only machine‑specific file, and it is never committe
 ```bash
 curl -O https://cdn.aelum.dev/<tag>/<filename>.iso
 curl -O https://cdn.aelum.dev/<tag>/<filename>.iso.sha256
+curl -O https://cdn.aelum.dev/<tag>/<filename>.iso.asc
 sha256sum -c <filename>.iso.sha256
 
-gpg --import aelum-release-key.asc
+# fetch the signing key over WKD (no keyserver, no manual import)
+gpg --auto-key-locate clear,wkd --locate-key release@aelum.dev
 gpg --verify <filename>.iso.asc <filename>.iso
 ```

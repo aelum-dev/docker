@@ -10,13 +10,13 @@
 #   2. Generates SHA-256 and SHA-512 checksum files.
 #   3. Produces a detached ASCII-armored GPG signature for the ISO (headless if
 #      AELUM_GPG_PRIVATE_KEY_B64 + GPG_PASSPHRASE are set).
-#   4. Exports the public signing key (aelum-release-key.asc).
+#   4. Exports the public signing key locally (users fetch it via WKD).
 #   5. Verifies the checksums and signature before returning, so a bad release
 #      fails fast.
 #
-# The signed assets (ISO, *.sha256, *.sha512, *.asc, aelum-release-key.asc) are
-# uploaded alongside the ISO to Cloudflare R2 by publish-iso.sh. Users verify
-# with the commands printed at the end.
+# The signed assets (ISO, *.sha256, *.sha512, *.asc) are uploaded alongside the
+# ISO to Cloudflare R2 by publish-iso.sh. The public key is distributed via WKD
+# instead of a hosted file. Users verify with the commands printed at the end.
 #
 # Usage:
 #   ./release-iso.sh                 # release newest ISO in ../output
@@ -130,12 +130,13 @@ echo "==> Verifying assets..."
 gpg --verify "$SIG" "$ISO" && echo "==> GPG signature: OK"
 echo
 
-# ── Export the public key ─────────────────────────────────────────────────────
-# Users need the public key to verify the signature. The script does not publish
-# it anywhere — it only writes the file, which you upload to R2 / a keyserver.
+# ── Export the public key (local only, not published) ─────────────────────────
+# Users fetch the key over WKD (https://aelum.dev/.well-known/openpgpkey/), so it
+# is no longer uploaded as a sidecar. This export is just a local convenience for
+# manual verification.
 PUB_KEY="$DIR/aelum-release-key.asc"
 gpg --export --armor "$AELUM_GPG_KEY" > "$PUB_KEY"
-echo "==> Public key written: $PUB_KEY"
+echo "==> Public key written locally (not published): $PUB_KEY"
 echo
 
 cat <<EOF
@@ -146,6 +147,5 @@ Release assets to upload to Cloudflare R2 (same folder as the ISO):
     $BASE.sha256
     $BASE.sha512
     $BASE.asc
-    aelum-release-key.asc
 
 EOF

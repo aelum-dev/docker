@@ -3,7 +3,7 @@
 #
 # This is the upload half of the automated release pipeline. It:
 #
-#   1. Uploads the ISO + checksums + GPG signature + signing key to R2
+#   1. Uploads the ISO + checksums + GPG signature to R2
 #      (public-read), same as before.
 #   2. Builds latest.json (machine-readable release metadata) and uploads it to
 #      the bucket root, served publicly at /latest.json (public R2 bucket).
@@ -38,11 +38,11 @@
 # Requires the signed assets to already exist next to the ISO (run
 # scripts/release-iso.sh first). Optional env to describe the signing key and
 # set the public CDN base for the asset URLs:
-#          export AELUM_SIGNING_UID="Ivan Kornienko <ik.workmail39@gmail.com>"
-#          export AELUM_SIGNING_FP="A675F61C22C26FCE187262E448CC48FDFD881E0D"
-#          export AELUM_SIGNING_FP_TOP="A675 F61C 22C2 6FCE 1872"
-#          export AELUM_SIGNING_FP_BOT="62E4 48CC 48FD FD88 1E0D"
-#          export AELUM_SIGNING_EXPIRES="2029-08-27"
+#          export AELUM_SIGNING_UID="Aelum Release <release@aelum.dev>"
+#          export AELUM_SIGNING_FP="728F5F59FB2F5A88C6EE28D4930A672A3A1B5B60"
+#          export AELUM_SIGNING_FP_TOP="728F 5F59 FB2F 5A88 C6EE"
+#          export AELUM_SIGNING_FP_BOT="28D4 930A 672A 3A1B 5B60"
+#          export AELUM_SIGNING_EXPIRES="never"
 #          export R2_PUBLIC_BASE="https://cdn.aelum.dev"
 
 set -euo pipefail
@@ -98,7 +98,7 @@ BASE="$(basename "$ISO_PATH")"
 DIR="$(dirname "$ISO_PATH")"
 TAG_DIR="r2:${R2_BUCKET}/${TAG}/"
 
-for extra in "$ISO_PATH" "$DIR/$BASE.sha256" "$DIR/$BASE.sha512" "$DIR/$BASE.asc" "$DIR/aelum-release-key.asc"; do
+for extra in "$ISO_PATH" "$DIR/$BASE.sha256" "$DIR/$BASE.sha512" "$DIR/$BASE.asc"; do
   if [[ -f "$extra" ]]; then
     echo "Uploading $(basename "$extra") -> ${TAG_DIR}$(basename "$extra")"
     rclone copy "$extra" "$TAG_DIR" \
@@ -108,9 +108,10 @@ for extra in "$ISO_PATH" "$DIR/$BASE.sha256" "$DIR/$BASE.sha512" "$DIR/$BASE.asc
 done
 
 # ── Publish release metadata ──────────────────────────────────────────────────
-# The signed assets (checksums, signature, signing key) must already sit next to
-# the ISO. Build latest.json + the website's release.ts, then upload latest.json
-# to the bucket root so it is served publicly at /latest.json.
+# The signed assets (checksums, signature) must already sit next to the ISO. Build
+# latest.json + the website's release.ts, then upload latest.json to the bucket
+# root so it is served publicly at /latest.json. The public key is distributed via
+# WKD, not as a hosted sidecar.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 META_DIR="$(mktemp -d)"
 trap 'rm -f "$TMP_CONFIG"; rm -rf "$META_DIR"' EXIT

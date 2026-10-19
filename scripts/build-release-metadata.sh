@@ -17,9 +17,9 @@
 #       --tag v2026.08.28 \
 #       --bucket aelum \
 #       --public-base https://cdn.aelum.dev \
-#       --signing-uid "Ivan Kornienko <ik.workmail39@gmail.com>" \
-#       --signing-fp "A675F61C22C26FCE187262E448CC48FDFD881E0D" \
-#       --expires 2029-08-27 \
+#       --signing-uid "Aelum Release <release@aelum.dev>" \
+#       --signing-fp "728F5F59FB2F5A88C6EE28D4930A672A3A1B5B60" \
+#       --expires never \
 #       --out-dir /tmp/release
 #
 # Writes:  $out-dir/latest.json   and   $out-dir/release.ts
@@ -97,8 +97,7 @@ cat > "$OUT_DIR/latest.json" <<JSON
     "iso": "${iso_url}",
     "sha256": "${PUBLIC_BASE}/${TAG}/${BASE}.sha256",
     "sha512": "${PUBLIC_BASE}/${TAG}/${BASE}.sha512",
-    "signature": "${PUBLIC_BASE}/${TAG}/${BASE}.asc",
-    "key": "${PUBLIC_BASE}/${TAG}/aelum-release-key.asc"
+    "signature": "${PUBLIC_BASE}/${TAG}/${BASE}.asc"
   },
   "signingKey": {
     "uid": "${SIGNING_UID}",
@@ -136,8 +135,7 @@ TS
   echo "    iso: \"$(esc "$iso_url")\","
   echo "    sha256: \"${PUBLIC_BASE}/${TAG}/${BASE}.sha256\","
   echo "    sha512: \"${PUBLIC_BASE}/${TAG}/${BASE}.sha512\","
-  echo "    signature: \"${PUBLIC_BASE}/${TAG}/${BASE}.asc\","
-  echo "    key: \"${PUBLIC_BASE}/${TAG}/aelum-release-key.asc\""
+  echo "    signature: \"${PUBLIC_BASE}/${TAG}/${BASE}.asc\""
   echo "  },"
   echo "  signingKey: {"
   echo "    uid: \"$(esc "$SIGNING_UID")\","
