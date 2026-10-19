@@ -75,7 +75,7 @@ make release ISO=output/foo.iso   # release a specific ISO
 
 This runs, in order:
 
-1. `scripts/release-iso.sh` — sign + checksum the ISO (imports the private key
+1. `scripts/sign-iso.sh` — sign + checksum the ISO (imports the private key
    from the env, signs headlessly, verifies everything, prints the asset list).
 2. `scripts/publish-iso.sh` — upload the ISO + sidecars to R2 (`public-read`),
    build + upload `latest.json`, and generate the website's `release.ts`.
@@ -101,9 +101,9 @@ Your `release.env` is the only machine‑specific file, and it is never committe
 
 | Script | What it does |
 |--------|--------------|
-| `scripts/release-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key locally (it is distributed via WKD), and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
+| `scripts/sign-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key locally (it is distributed via WKD), and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
 | `scripts/publish-iso.sh` | Uploads the ISO + sidecars to R2 (`public-read`), builds + uploads `latest.json`, and generates the website's `release.ts`. Builds a throwaway rclone config from the env — never touches your main `rclone.conf`. |
-| `scripts/build-release-metadata.sh` | Turns the signed ISO into `latest.json` (R2 manifest) and `release.ts` (website module) from the same source of truth, so the two can't drift. |
+| `scripts/gen-release-metadata.sh` | Turns the signed ISO into `latest.json` (R2 manifest) and `release.ts` (website module) from the same source of truth, so the two can't drift. |
 | `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the fine-grained PAT, or an SSH key as a fallback). GitHub Pages rebuilds automatically. |
 
 ## Verifying (for users)

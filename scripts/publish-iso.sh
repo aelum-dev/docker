@@ -8,7 +8,7 @@
 #   2. Builds latest.json (machine-readable release metadata) and uploads it to
 #      the bucket root, served publicly at /latest.json (public R2 bucket).
 #   3. Generates the website's src/lib/release.ts so the download links update
-#      automatically (see docker/scripts/build-release-metadata.sh).
+#      automatically (see docker/scripts/gen-release-metadata.sh).
 #
 # After this runs, trigger the website build (commit release.ts to the website
 # repo's main branch, or run scripts/publish-website.sh) and GitHub Pages will
@@ -36,7 +36,7 @@
 # If no tag/file is given, it auto-selects the newest *.iso in output/.
 #
 # Requires the signed assets to already exist next to the ISO (run
-# scripts/release-iso.sh first). Optional env to describe the signing key and
+# scripts/sign-iso.sh first). Optional env to describe the signing key and
 # set the public CDN base for the asset URLs:
 #          export AELUM_SIGNING_UID="Aelum Release <release@aelum.dev>"
 #          export AELUM_SIGNING_FP="728F5F59FB2F5A88C6EE28D4930A672A3A1B5B60"
@@ -65,6 +65,10 @@ if [[ -z "${R2_ACCOUNT_ID}${R2_ACCESS_KEY}${R2_SECRET_KEY}" ]]; then
     exit 1
 fi
 R2_ENDPOINT="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com}"
+# Public base URL for the downloadable assets (custom CDN domain, or the R2
+# endpoint if unset). Resolved once so the metadata and the closing summary
+# always agree.
+R2_PUBLIC_BASE="${R2_PUBLIC_BASE:-https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com}"
 
 TAG="${1:?usage: publish-iso.sh <tag> [iso-path]}"
 ISO_PATH="${2:-$(ls -1t "$ROOT_DIR"/output/*.iso 2>/dev/null | head -1)}"
@@ -116,22 +120,57 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 META_DIR="$(mktemp -d)"
 trap 'rm -f "$TMP_CONFIG"; rm -rf "$META_DIR"' EXIT
 
-# Derive the signing-key fields from the .asc/.asc sidecar if not provided.
+# Signing-key metadata: prefer the explicit AELUM_SIGNING_* values (release.env
+# normally sets them); otherwise derive what we can from the key that produced
+# the signature, resolved through the local keyring.
 SIGNING_UID="${AELUM_SIGNING_UID:-}"
-if [[ -z "$SIGNING_UID" && -f "$ISO_PATH.asc" ]]; then
-  SIGNING_UID="$(grep -m1 'uid=' "$ISO_PATH.asc" | sed -E 's/.*uid="?([^"]+)"?.*/\1/')"
+SIGNING_FP="${AELUM_SIGNING_FP:-}"
+SIGNING_FP_TOP="${AELUM_SIGNING_FP_TOP:-}"
+SIGNING_FP_BOT="${AELUM_SIGNING_FP_BOT:-}"
+SIGNING_EXPIRES="${AELUM_SIGNING_EXPIRES:-}"
+
+if { [[ -z "$SIGNING_UID" ]] || [[ -z "$SIGNING_FP" ]] || [[ -z "$SIGNING_EXPIRES" ]]; } \
+   && [[ -f "$ISO_PATH.asc" ]]; then
+  # A detached signature carries the issuer keyid (and, on modern GnuPG, the
+  # full issuer fingerprint) but never a uid — so look the key up by issuer.
+  _packets="$(gpg --list-packets "$ISO_PATH.asc" 2>/dev/null || true)"
+  _re_fpr='issuer fpr v[0-9] ([0-9A-Fa-f]+)'
+  if [[ "$_packets" =~ keyid[[:space:]]+([0-9A-Fa-f]{8,}) ]]; then
+    _issuer="${BASH_REMATCH[1]}"
+  elif [[ "$_packets" =~ $_re_fpr ]]; then
+    _issuer="${BASH_REMATCH[1]}"
+  else
+    _issuer=""
+  fi
+  if [[ -n "$_issuer" ]]; then
+    _colons="$(gpg --with-colons --list-keys "$_issuer" 2>/dev/null || true)"
+    [[ -n "$SIGNING_UID" ]] || SIGNING_UID="$(awk -F: '/^uid:/{print $10; exit}' <<<"$_colons")"
+    [[ -n "$SIGNING_FP"  ]] || SIGNING_FP="$(awk -F: '/^fpr:/{print $10; exit}' <<<"$_colons")"
+    if [[ -z "$SIGNING_FP_TOP" && -n "$SIGNING_FP" ]]; then
+      SIGNING_FP_TOP="${SIGNING_FP:0:4} ${SIGNING_FP:4:4} ${SIGNING_FP:8:4} ${SIGNING_FP:12:4} ${SIGNING_FP:16:4}"
+      SIGNING_FP_BOT="${SIGNING_FP:20:4} ${SIGNING_FP:24:4} ${SIGNING_FP:28:4} ${SIGNING_FP:32:4} ${SIGNING_FP:36:4}"
+    fi
+    if [[ -z "$SIGNING_EXPIRES" ]]; then
+      _exp="$(awk -F: '/^pub:/{print $7; exit}' <<<"$_colons")"
+      if [[ -n "$_exp" ]]; then
+        SIGNING_EXPIRES="$(date -u -d "@$_exp" +%Y-%m-%d)"
+      else
+        SIGNING_EXPIRES="never"
+      fi
+    fi
+  fi
 fi
 
-bash "$SCRIPT_DIR/build-release-metadata.sh" \
+bash "$SCRIPT_DIR/gen-release-metadata.sh" \
   --iso "$ISO_PATH" \
   --tag "$TAG" \
   --bucket "$R2_BUCKET" \
-  --public-base "${R2_PUBLIC_BASE:-https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com}" \
+  --public-base "$R2_PUBLIC_BASE" \
   --signing-uid "$SIGNING_UID" \
-  --signing-fp "${AELUM_SIGNING_FP:-}" \
-  --signing-fp-top "${AELUM_SIGNING_FP_TOP:-}" \
-  --signing-fp-bot "${AELUM_SIGNING_FP_BOT:-}" \
-  --expires "${AELUM_SIGNING_EXPIRES:-}" \
+  --signing-fp "$SIGNING_FP" \
+  --signing-fp-top "$SIGNING_FP_TOP" \
+  --signing-fp-bot "$SIGNING_FP_BOT" \
+  --expires "$SIGNING_EXPIRES" \
   --out-dir "$META_DIR"
 
 META_JSON="$META_DIR/latest.json"

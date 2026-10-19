@@ -46,6 +46,11 @@ BRANCH="${WEBSITE_BRANCH:-main}"
 # auth, but 'x-access-token' is the conventional value. Override via
 # WEBSITE_TOKEN_USER if your token requires a real username.
 WEBSITE_TOKEN_USER="${WEBSITE_TOKEN_USER:-x-access-token}"
+# Identity for the generated commit. The throwaway clone has no local git
+# identity, so without this the commit would inherit the machine's global
+# identity instead of Aelum's.
+GIT_NAME="${WEBSITE_GIT_NAME:-Aelum}"
+GIT_EMAIL="${WEBSITE_GIT_EMAIL:-344758081+aelum-dev@users.noreply.github.com}"
 
 if [[ ! -f "$RELEASE_TS" ]]; then
   echo "ERROR: no generated release.ts at $RELEASE_TS (run scripts/publish-iso.sh first)." >&2
@@ -70,12 +75,8 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo "==> Cloning $WEBSITE_REPO ($BRANCH) via ${REMOTE%%:*}..."
-git clone --depth 1 "$REMOTE" "$WORK/site"
+git clone --depth 1 --branch "$BRANCH" "$REMOTE" "$WORK/site"
 cd "$WORK/site"
-
-if [[ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]]; then
-  git checkout "$BRANCH" || git fetch origin "$BRANCH" && git checkout -B "$BRANCH" origin "$BRANCH"
-fi
 
 VERSION="$(sed -n 's/.*version: "\(.*\)".*/\1/p' "$RELEASE_TS" | head -1)"
 cp "$RELEASE_TS" "src/lib/release.ts"
@@ -89,7 +90,8 @@ if git diff --cached --exit-code -- src/lib/release.ts >/dev/null 2>&1; then
   exit 0
 fi
 
-git commit -m "chore: update download links to v${VERSION}" >/dev/null
+git -c user.name="$GIT_NAME" -c user.email="$GIT_EMAIL" \
+  commit -m "chore: update download links to v${VERSION}" >/dev/null
 echo "==> Pushing to $BRANCH..."
 git push origin "$BRANCH"
 echo "==> Done. GitHub Pages will rebuild with the new links."

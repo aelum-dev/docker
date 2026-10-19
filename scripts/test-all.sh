@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# test-matrix.sh — run the full Aelum install matrix headlessly and print a
+# test-all.sh — run the full Aelum install matrix headlessly and print a
 # pass/fail summary. Each cell boots the ISO in QEMU, performs an install via
-# test-iso.sh, and (by default) independently verifies the installed system.
+# test-install.sh, and (by default) independently verifies the installed system.
 #
 # Dimensions (override with the matching space-separated list):
 #   MODES        auto manual     installation path     (default: both)
@@ -11,21 +11,21 @@
 #   LVMS         0 1             LVM logical volumes   (default: both)
 #
 # Examples:
-#   ./scripts/test-matrix.sh                     # all 16 combinations
-#   LVMS=1 ./scripts/test-matrix.sh              # only the LVM cells (8)
-#   MODES=auto FILESYSTEMS=ext4 LVMS=1 ./scripts/test-matrix.sh
-#   SHARED_INSTALLER=1 ./scripts/test-matrix.sh  # drive installs from /shared
+#   ./scripts/test-all.sh                     # all 16 combinations
+#   LVMS=1 ./scripts/test-all.sh              # only the LVM cells (8)
+#   MODES=auto FILESYSTEMS=ext4 LVMS=1 ./scripts/test-all.sh
+#   SHARED_INSTALLER=1 ./scripts/test-all.sh  # drive installs from /shared
 #
 # A full desktop install is heavy: 16 cells takes a long time. Narrow the lists
 # while iterating (e.g. LVMS=1 MODES=auto FILESYSTEMS=ext4).
 #
-# Forwarded to test-iso.sh: LUKS_PASS, USER_PASS, USERNAME, SSH_PORT, QEMU_QVM,
+# Forwarded to test-install.sh: LUKS_PASS, USER_PASS, USERNAME, SSH_PORT, QEMU_QVM,
 # DISK_PATH, VERIFY, SHARED_INSTALLER, SHARED_DIR, ISO.
 
 set -uo pipefail
 
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TEST="$PROFILE_DIR/scripts/test-iso.sh"
+TEST="$PROFILE_DIR/scripts/test-install.sh"
 
 MODES="${MODES:-auto manual}"
 FILESYSTEMS="${FILESYSTEMS:-btrfs ext4}"

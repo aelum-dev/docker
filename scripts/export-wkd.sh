@@ -27,7 +27,7 @@
 # Optional env:
 #   AELUM_GPG_PRIVATE_KEY / AELUM_GPG_PRIVATE_KEY_B64 — import a key from the
 #                       environment first (clean/CI machine, same as
-#                       release-iso.sh).
+#                       sign-iso.sh).
 #   WKD_OUT_DIR         — where to write the tree; defaults to
 #                       <repo>/website/public/.well-known/openpgpkey.
 #

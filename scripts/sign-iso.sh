@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# release-iso.sh — sign + checksum the ISO for release. Part of the local
-# release pipeline: release.sh → release-iso.sh → publish-iso.sh →
+# sign-iso.sh — sign + checksum the ISO for release. Part of the local
+# release pipeline: release.sh → sign-iso.sh → publish-iso.sh →
 # publish-website.sh (the website link update is automated, not by hand).
 #
 # It:
@@ -19,9 +19,9 @@
 # instead of a hosted file. Users verify with the commands printed at the end.
 #
 # Usage:
-#   ./release-iso.sh                 # release newest ISO in ../output
-#   ./release-iso.sh path/to.iso     # release a specific ISO
-#   AELUM_GPG_KEY=0xABCD... ./release-iso.sh
+#   ./sign-iso.sh                    # release newest ISO in ../output
+#   ./sign-iso.sh path/to.iso        # release a specific ISO
+#   AELUM_GPG_KEY=0xABCD... ./sign-iso.sh
 #
 set -euo pipefail
 
@@ -70,7 +70,7 @@ if [[ -n "${AELUM_GPG_PRIVATE_KEY:-}" || -n "${AELUM_GPG_PRIVATE_KEY_B64:-}" ]];
     echo "==> Importing signing key..."
     printf '%s' "$KEY_ARMOR" | gpg --import --batch 2>&1 | tail -2
     # Mark the key ultimately trusted so verification shows no 'untrusted' warning.
-    printf 'trust\nultimate\ny\n' | gpg --command-fd 0 --batch --edit-user-id "$AELUM_GPG_KEY" 2>/dev/null | tail -1 || true
+    printf 'trust\n5\ny\n' | gpg --command-fd 0 --batch --yes --edit-key "$AELUM_GPG_KEY" >/dev/null 2>&1 || true
 fi
 
 echo "==> ISO:     $ISO"

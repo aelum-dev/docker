@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # verify-installed.sh — independently inspect an Aelum install on the target
-# disk. It runs inside the live ISO (as root) after test-iso.sh performs an
+# disk. It runs inside the live ISO (as root) after test-install.sh performs an
 # install. It never calls the installer, so it validates the on-disk result
 # rather than the code that produced it.
 #
-# Inputs (environment, supplied by test-iso.sh):
+# Inputs (environment, supplied by test-install.sh):
 #   FILESYSTEM  ext4 | btrfs   filesystem on the LVs / root partition
 #   LUKS        0 | 1          root partition is LUKS2-encrypted
 #   LVM         0 | 1          root+home are logical volumes in the `aelum` VG

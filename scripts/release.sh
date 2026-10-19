@@ -46,7 +46,7 @@ fi
 
 # 3. Run the pipeline.
 echo "==> Release $TAG: $ISO"
-"$SCRIPT_DIR/release-iso.sh" "$ISO"
+"$SCRIPT_DIR/sign-iso.sh" "$ISO"
 "$SCRIPT_DIR/publish-iso.sh" "$TAG" "$ISO"
 "$SCRIPT_DIR/publish-website.sh"
 echo "==> Done. $TAG published to R2 and website links updated."

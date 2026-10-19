@@ -80,8 +80,8 @@ kill_stale() {
     for pid in $(pgrep -f "qemu-system-x86_64.*${base_iso}.*${base_disk}" 2>/dev/null); do
         kill -9 "$pid" 2>/dev/null
     done
-    # [t]est\.sh keeps this regex from matching its own command line.
-    for pid in $(pgrep -f "[t]est\.sh" 2>/dev/null); do
+    # [t]est-install\.sh keeps this regex from matching its own command line.
+    for pid in $(pgrep -f "[t]est-install\.sh" 2>/dev/null); do
         [ "$pid" = "$self_pid" ] && continue
         [ "$pid" = "$PPID" ] && continue
         kill -9 "$pid" 2>/dev/null

@@ -105,9 +105,8 @@ The ISO is too large for GitHub Releases, so releases are published to a Cloudfl
 [R2](https://developers.cloudflare.com/r2/) bucket, and the download links on
 the website are updated **automatically** — no hand-editing. The pieces:
 
-- **`scripts/release-iso.sh`** — sign + checksum the ISO (GPG detached signature,
-  SHA-256/SHA-512, exported public key). Verifies everything before printing the
-  assets to upload.
+- **`scripts/sign-iso.sh`** — sign + checksum the ISO (GPG detached signature,
+  SHA-256/SHA-512). Verifies everything before printing the assets to upload.
 - **`scripts/publish-iso.sh`** — upload the assets to the `aelum` R2 bucket
   (`public-read`), then build and upload **`latest.json`** (machine-readable
   release metadata) to the bucket root (served publicly), and generate the
@@ -145,18 +144,18 @@ R2_PUBLIC_BASE                                   # optional CDN domain for asset
 
 ### Sign & checksum only
 
-`scripts/release-iso.sh`:
+`scripts/sign-iso.sh`:
 
 ```bash
 export AELUM_GPG_KEY='0x1234ABCD'     # or 'Name <email>'
-./scripts/release-iso.sh              # newest ISO in output/
+./scripts/sign-iso.sh              # newest ISO in output/
 # or release a specific one:
-./scripts/release-iso.sh output/aelum-2026.08.28-x86_64.iso
+./scripts/sign-iso.sh output/aelum-2026.08.28-x86_64.iso
 ```
 
-Produces SHA-256/SHA-512 checksums, a detached ASCII-armored GPG signature,
-and exports the public signing key. It verifies everything before printing the
-exact list of assets to upload.
+Produces SHA-256/SHA-512 checksums and a detached ASCII-armored GPG signature
+(the public key is exported locally; distribution is via WKD). It verifies
+everything before printing the exact list of assets to upload.
 
 **Upload** — `scripts/publish-iso.sh`:
 
@@ -213,64 +212,11 @@ Launches the latest ISO in `output/` in QEMU with:
 
 `OVMF_VARS.fd` and `vdisk.qcow2` are created on first run if absent.
 
-## Boot-time measurement
-
-```bash
-make measure-boot                    # headless (egl-headless GPU)
-DISPLAY_MODE=sdl make measure-boot   # watch the boot live in an SDL window
-DISPLAY_MODE=none make measure-boot  # no GPU: non-graphical chain only
-KEEP=1 make measure-boot             # leave the VM running for follow-up probes
-```
-
-`scripts/measure-boot.sh` boots the ISO in QEMU **with a GPU** (so the graphical
-boot chain actually runs) and pipes `scripts/boot-timing.sh` into the guest over
-SSH. The collector reconstructs a monotonic timeline from `systemd-analyze`,
-systemd unit timestamps and `/proc/<pid>/stat` — nothing is baked into the ISO.
-It prints each component's start time plus the gap that matters:
-
-```
-plymouth-quit (splash dismissed)  ->  installer window mapped
-```
-
-Artifacts land in `logs/boot-timing.log` (raw collector output, including a full
-per-process start-time table) and `logs/boot-timing.json` (machine-readable
-timings). `SSH_PORT`, `WINDOW_TIMEOUT`, `MEM`, `XRES`, `YRES`, `QEMU_EXTRA` and
-`ISO` override the defaults, mirroring `test-iso.sh`.
-
-Use `DISPLAY_MODE=none` when no GPU is available; the compositor will not start,
-so the installer-window row is reported as `n/a`.
-
-## Ad-hoc guest probes
-
-`scripts/probe-stall.sh` boots the ISO the same way, but instead of printing a
-report it pipes `GUEST_SCRIPT` (default `scripts/probe-stall-guest.sh`) into the
-guest as root and tees everything to `logs/stall-probe.log`. Use it when a boot
-question needs live state rather than reconstructed timings:
-
-```bash
-bash scripts/probe-stall.sh                    # default guest probe
-DISPLAY_MODE=sdl bash scripts/probe-stall.sh   # watch it while it samples
-STALL_DUR=120 bash scripts/probe-stall.sh      # longer sampler window
-GUEST_SCRIPT=scripts/my-probe.sh bash scripts/probe-stall.sh
-```
-
-The default guest probe prints a one-shot snapshot of the finished boot —
-`systemd-analyze` time / critical-chain / blame, jobs still queued, DRM state,
-mounts — and then samples the live process tree every 0.5 s for `STALL_DUR`
-seconds (default 50): CPU/IO pressure, load average, top CPU, D-state tasks, the
-compositor's `wchan`, and the installer's per-thread CPU. It closes with the full
-`journalctl -b` and `dmesg`. It was written to catch the post-greetd black-screen
-stall, so it is slanted that way, but the snapshot and the sampler are generic
-boot diagnostics.
-
-`ISO`, `SSH_PORT`, `DISPLAY_MODE`, `XRES`, `YRES`, `MEM`, `QEMU_EXTRA` and `LOG`
-override the defaults, mirroring `measure-boot.sh`.
-
 ## Test / boot (headless QEMU + installer CLI)
 
 ```bash
-bash scripts/test-iso.sh        # auto: boot, run a full install, then stop QEMU
-MODE=boot bash scripts/test-iso.sh   # boot: leave the headless VM running for experiments
+bash scripts/test-install.sh        # auto: boot, run a full install, then stop QEMU
+MODE=boot bash scripts/test-install.sh   # boot: leave the headless VM running for experiments
 ```
 
 Two modes, selected with `MODE`:
@@ -313,11 +259,11 @@ stopped. The disk is recreated from scratch each run so format/partitioning is
 exercised against a clean target:
 
 ```bash
-MODE=auto bash scripts/test-iso.sh
+MODE=auto bash scripts/test-install.sh
 # or, via make (single install):
 make test-one
 # or pin the filesystem / account:
-USERNAME=aelum USER_PASS=aelum DISK_PATH=/dev/vda MODE=auto bash scripts/test-iso.sh
+USERNAME=aelum USER_PASS=aelum DISK_PATH=/dev/vda MODE=auto bash scripts/test-install.sh
 ```
 
 **Manual / dualboot mode** — boot the VM headless (this also mounts the host
@@ -328,7 +274,7 @@ safe.
 
 ```bash
 # 1) Boot headless with /shared mounted, leave the VM running
-MODE=boot bash scripts/test-iso.sh
+MODE=boot bash scripts/test-install.sh
 
 # 2) SSH in and run a manual install (password via stdin)
 ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost
@@ -370,7 +316,7 @@ geometry and drives `--manual-layout` itself, so no hand-written JSON is needed.
 
 ### LVM and the full install matrix
 
-Every supported layout can be exercised without the GUI. `test-iso.sh` reads
+Every supported layout can be exercised without the GUI. `test-install.sh` reads
 these from the environment and passes the matching flags to the CLI:
 
 | Variable | Values | Effect |
@@ -435,18 +381,15 @@ the lists while iterating.
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── run-iso.sh             # QEMU launch script
-│   ├── measure-boot.sh        # boot-time measurement driver (QEMU + report)
-│   ├── boot-timing.sh         # boot-time collector (runs inside the guest)
-│   ├── probe-stall.sh         # boot the ISO and run a guest diagnostic over SSH
-│   ├── probe-stall-guest.sh   # that diagnostic (runs inside the guest)
-│   ├── test-iso.sh            # headless QEMU + installer-cli test
-│   ├── test-matrix.sh         # run the full install matrix, print a summary
+│   ├── test-install.sh        # headless QEMU + installer-cli test
+│   ├── test-all.sh            # run the full install matrix, print a summary
 │   ├── verify-installed.sh    # independent post-install inspection (in the guest)
 │   ├── release.sh             # entry point: load secrets, sign, upload, update site
-│   ├── release-iso.sh         # sign + checksum the ISO (GPG) for release
-│   ├── build-release-metadata.sh  # build latest.json + website release.ts
+│   ├── sign-iso.sh            # sign + checksum the ISO (GPG) for release
+│   ├── gen-release-metadata.sh    # build latest.json + website release.ts
 │   ├── publish-iso.sh         # upload ISO + sidecars + latest.json to R2
-│   └── publish-website.sh     # push release.ts to the website repo
+│   ├── publish-website.sh     # push release.ts to the website repo
+│   └── export-wkd.sh          # regenerate the WKD tree in the website repo
 ├── logs/                      # test artifacts (test-progress.json, test-run.log)
 ├── output/                    # Built ISO files (bind-mounted from host)
 ├── OVMF_VARS.fd               # UEFI variables for QEMU
