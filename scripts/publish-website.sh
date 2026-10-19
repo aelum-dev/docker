@@ -50,7 +50,7 @@ WEBSITE_TOKEN_USER="${WEBSITE_TOKEN_USER:-x-access-token}"
 # identity, so without this the commit would inherit the machine's global
 # identity instead of Aelum's.
 GIT_NAME="${WEBSITE_GIT_NAME:-Aelum}"
-GIT_EMAIL="${WEBSITE_GIT_EMAIL:-344758081+aelum-dev@users.noreply.github.com}"
+GIT_EMAIL="${WEBSITE_GIT_EMAIL:-aelumdev@gmail.com}"
 
 if [[ ! -f "$RELEASE_TS" ]]; then
   echo "ERROR: no generated release.ts at $RELEASE_TS (run scripts/publish-iso.sh first)." >&2
