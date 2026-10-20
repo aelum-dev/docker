@@ -238,15 +238,15 @@ is used to log in.
 
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
   `SSH_PORT`, `DISK_PATH`, `FILESYSTEM`, `LUKS`, `LUKS_PASS`, `LVM`, `MANUAL`,
-  `VERIFY`, `SHARED_INSTALLER`, `QEMU_QVM` (0 disables KVM), `QEMU_EXTRA`,
-  `SHARED_DIR`.
+  `REUSE_ESP`, `VERIFY`, `SHARED_INSTALLER`, `QEMU_QVM` (0 disables KVM),
+  `QEMU_EXTRA`, `SHARED_DIR`.
 - Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
   progress in auto mode), `qemu.log` (QEMU output), `matrix/` (per-cell logs).
 - Also exposed as make targets: `make test` (runs **every** install variation —
   the full matrix), `make test-one` (a single install, flag-driven), and
   `make test-boot` (boot). `make test-one` forwards `FILESYSTEM` / `LUKS` /
-  `LVM` / `MANUAL` / `VERIFY` to the script, so `make test-one LVM=1` and
-  `LVM=1 make test-one` both work.
+  `LVM` / `MANUAL` / `REUSE_ESP` / `VERIFY` to the script, so
+  `make test-one LVM=1` and `LVM=1 make test-one` both work.
 
 ### Testing the installer CLI
 
@@ -288,31 +288,59 @@ types.go`). Each partition row carries `path` (existing device, e.g.
 remaining free space), `type` (`"esp"`, `"system"`, or empty to leave it
 untouched), and — for existing partitions — the exact `sizeBytes`.
 
-The exact layout used to test manual mode against the stock 20 GiB virtual
-disk (`/dev/vda` = 21474836480 bytes, `/dev/vda1` EFI 512 MiB vfat,
-`/dev/vda2` Root ~19.5 GiB ext4):
+A fresh-disk layout creates both partitions (empty `path`, `sizeMB: 0` = fill
+the remaining space):
 
 ```json
 {
   "disk": "/dev/vda",
   "diskSizeMB": 20480,
   "diskSizeBytes": 21474836480,
+  "sectorSizeBytes": 512,
   "partitions": [
-    {"index": 0, "path": "/dev/vda1", "sizeMB": 512, "sizeBytes": 536870912, "existingFstype": "vfat", "type": "esp"},
-    {"index": 1, "path": "/dev/vda2", "sizeMB": 19966, "sizeBytes": 20936900096, "existingFstype": "ext4", "type": "system"}
-  ],
-  "freeSectors": 2014
+    {"index": 0, "path": "", "sizeMB": 512, "type": "esp"},
+    {"index": 1, "path": "", "sizeMB": 0, "type": "system"}
+  ]
 }
 ```
 
-To test the dualboot-safe *preserve* path, add extra rows with an empty `type`
-(e.g. another OS's existing partition) — those partitions are never formatted,
-mounted, or written to the fstab. Validate the layout before committing to a
-real install by running the same command with `--dry-run` appended.
+To reuse an existing ESP (dualboot), point the `esp` row at the existing
+partition and set its exact size and filesystem. The installer mounts it as-is:
+it is **never formatted**, and its size has no floor. Only a brand-new ESP needs
+the 512 MiB minimum.
+
+```json
+{
+  "disk": "/dev/vda",
+  "diskSizeMB": 20480,
+  "diskSizeBytes": 21474836480,
+  "sectorSizeBytes": 512,
+  "partitions": [
+    {"index": 0, "path": "/dev/vda1", "sizeMB": 100, "sizeBytes": 104857600, "existingFstype": "vfat", "type": "esp"},
+    {"index": 1, "path": "", "sizeMB": 0, "type": "system"}
+  ]
+}
+```
+
+A reused ESP must be FAT (`vfat`, or the `fat32` alias); anything else is
+rejected during validation. Other existing partitions on the disk (Windows,
+another distro) are represented by rows with an empty `type` and are never
+formatted, mounted, or added to the fstab.
+
+Validate the layout before committing to a real install by running the same
+command with `--dry-run` appended.
 
 `MANUAL=1` automates the manual path end to end: it builds a fresh-disk layout
 (a 512 MiB ESP plus a System partition filling the rest) from the guest's
 geometry and drives `--manual-layout` itself, so no hand-written JSON is needed.
+Add `REUSE_ESP=1` to pre-create a 100 MiB FAT ESP containing a marker file and
+install into the remaining free space reusing it. The post-install check then
+asserts the marker survived (the ESP was not formatted) and rEFInd was installed
+onto it — the full dualboot regression test:
+
+```bash
+MANUAL=1 REUSE_ESP=1 make test-one
+```
 
 ### LVM and the full install matrix
 
@@ -325,6 +353,7 @@ these from the environment and passes the matching flags to the CLI:
 | `LUKS` | `0` (default) \| `1` | LUKS2-encrypt the root partition |
 | `LVM` | `0` (default) \| `1` | place root+home on logical volumes in the `aelum` VG |
 | `MANUAL` | `0` (default) \| `1` | dualboot-safe manual partitioning (512 MiB ESP + System) |
+| `REUSE_ESP` | `0` (default) \| `1` | with `MANUAL=1`: pre-create a 100 MiB FAT ESP and reuse it (dualboot regression) |
 | `VERIFY` | `1` (default) \| `0` | inspect the installed system after the install |
 
 ```bash
@@ -332,6 +361,7 @@ LVM=1 make test-one                       # auto + btrfs + LVM
 LVM=1 FILESYSTEM=ext4 make test-one       # auto + ext4 + LVM
 LUKS=1 LVM=1 make test-one                # auto + LUKS + LVM
 MANUAL=1 LVM=1 make test-one              # manual + LVM
+MANUAL=1 REUSE_ESP=1 make test-one        # manual, reuse a pre-made 100 MiB ESP
 ```
 
 After a successful install, `scripts/verify-installed.sh` runs **inside the
@@ -344,8 +374,9 @@ the `aelum` VG, mounts the installed root read-only, and asserts
 - `/etc/fstab` mounts `/`, `/boot`, and (LVM or btrfs) `/home` correctly, with
   the right UUIDs and the `@home` subvolume where applicable;
 - `/etc/mkinitcpio.conf` `HOOKS` include `lvm2` (LVM) and an encrypt hook (LUKS);
-- the systemd-boot entry roots at `/dev/mapper/aelum-root` (LVM), carries
-  `rd.luks.name=` (LUKS), and `rootflags=subvol=@` only for btrfs.
+- rEFInd is installed at `EFI/refind/refind_x64.efi` with an `Aelum`
+  `refind.conf` menu entry whose options root at `/dev/mapper/aelum-root` (LVM),
+  carry `rd.luks.name=` (LUKS), and add `rootflags=subvol=@` only for btrfs.
 
 `verify-installed.sh` never calls the installer, so it validates the on-disk
 result rather than the code that produced it. Set `VERIFY=0` to skip it.

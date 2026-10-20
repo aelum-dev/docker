@@ -11,6 +11,7 @@
 #   LVM         0 | 1          root+home are logical volumes in the `aelum` VG
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
+#   REUSE_ESP   0 | 1          the ESP was pre-created and reused (dualboot)
 #
 # The installed system is mounted read-only; every check is reported and the
 # script exits non-zero if any check fails.
@@ -22,6 +23,7 @@ LUKS="${LUKS:-0}"
 LVM="${LVM:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
+REUSE_ESP="${REUSE_ESP:-0}"
 
 MNT=/mnt
 ESP="${DISK_PATH}1"
@@ -109,7 +111,9 @@ else
     mount -o ro "$rootdev" "$MNT" || { echo "FATAL: could not mount $rootdev"; exit 1; }
 fi
 mkdir -p "$MNT/boot"
-mount -o ro "$ESP" "$MNT/boot" 2>/dev/null \
+# Name the filesystem type: the kernel probe can miss a FAT partition when the
+# vfat module has not been loaded yet.
+mount -t vfat -o ro "$ESP" "$MNT/boot" 2>/dev/null \
     || echo "  note - could not mount ESP read-only; boot-entry checks may fail"
 
 # ── Filesystems ───────────────────────────────────────────────────────────────
@@ -152,29 +156,49 @@ if [ "$LUKS" = 1 ]; then
     check "HOOKS include an encrypt hook" has "$hooks" '(^|[^[:alnum:]_])(sd-encrypt|encrypt)([^[:alnum:]_]|$)'
 fi
 
-# ── Boot entry ────────────────────────────────────────────────────────────────
-section "boot entry"
-entry="$(ls "$MNT"/boot/loader/entries/*.conf 2>/dev/null | head -1)"
-if [ -z "$entry" ]; then
-    bad "systemd-boot entry exists under /boot/loader/entries/"
+# ── Bootloader (rEFInd) ───────────────────────────────────────────────────────
+section "bootloader"
+refind_dir="$MNT/boot/EFI/refind"
+check "rEFInd binary exists at EFI/refind/refind_x64.efi" test -f "$refind_dir/refind_x64.efi"
+conf="$refind_dir/refind.conf"
+check "rEFInd config exists at EFI/refind/refind.conf" test -f "$conf"
+check "rEFInd config has the Aelum menu entry" grep -Eq 'menuentry "Aelum"' "$conf"
+check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space:]]+[0-9]+' "$conf"
+# rEFInd tokenizes refind.conf: unquoted options would be truncated to the first
+# word (dropping rw/splash and rewriting slashes), so require the quoted form.
+check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]]+"' "$conf"
+# The Aelum stanza's kernel command line (indented `options` line).
+opts="$(grep -E '^[[:space:]]*options[[:space:]]+' "$conf" 2>/dev/null | head -1)"
+echo "  $opts"
+if [ "$LVM" = 1 ]; then
+    check "entry roots at the root LV (/dev/mapper/aelum-root)" has "$opts" 'root=/dev/mapper/aelum-root'
 else
-    opts="$(grep -E '^options' "$entry")"
-    echo "  $opts"
-    if [ "$LVM" = 1 ]; then
-        check "entry roots at the root LV (/dev/mapper/aelum-root)" has "$opts" 'root=/dev/mapper/aelum-root'
-    else
-        check "entry roots at the root filesystem UUID" has "$opts" 'root=UUID='
-    fi
-    if [ "$LUKS" = 1 ]; then
-        check "entry has rd.luks.name=" has "$opts" 'rd\.luks\.name='
-    else
-        check "entry has no rd.luks.name= (no LUKS)" hasnt "$opts" 'rd\.luks\.name='
-    fi
-    if [ "$FILESYSTEM" = btrfs ]; then
-        check "entry has rootflags=subvol=@ (btrfs)" has "$opts" 'rootflags=subvol=@'
-    else
-        check "entry has no btrfs rootflags (ext4)" hasnt "$opts" 'rootflags=subvol='
-    fi
+    check "entry roots at the root filesystem UUID" has "$opts" 'root=UUID='
+fi
+if [ "$LUKS" = 1 ]; then
+    check "entry has rd.luks.name=" has "$opts" 'rd\.luks\.name='
+else
+    check "entry has no rd.luks.name= (no LUKS)" hasnt "$opts" 'rd\.luks\.name='
+fi
+if [ "$FILESYSTEM" = btrfs ]; then
+    check "entry has rootflags=subvol=@ (btrfs)" has "$opts" 'rootflags=subvol=@'
+else
+    check "entry has no btrfs rootflags (ext4)" hasnt "$opts" 'rootflags=subvol='
+fi
+# NVRAM registration is best-effort during install, but in the UEFI test VM it
+# should have succeeded: the firmware needs an entry to launch rEFInd on boot.
+if command -v efibootmgr >/dev/null 2>&1; then
+    check "firmware boot entry points at rEFInd" has "$(efibootmgr -v 2>/dev/null)" '\\EFI\\refind\\refind_x64\.efi'
+fi
+
+# ── Reused ESP (dualboot) ─────────────────────────────────────────────────────
+# REUSE_ESP=1 pre-creates the ESP and writes this marker before the install. If
+# the installer formatted the ESP (the bug this scenario guards against), the
+# marker is gone.
+if [ "$REUSE_ESP" = "1" ]; then
+    section "reused ESP (dualboot)"
+    check "pre-existing ESP marker survived (ESP was not formatted)" test -f "$MNT/boot/dualboot-marker.txt"
+    check "pre-existing ESP marker contents intact" grep -qx 'aelum-dualboot-marker' "$MNT/boot/dualboot-marker.txt"
 fi
 
 # ── Installed packages ────────────────────────────────────────────────────────
