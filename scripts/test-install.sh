@@ -19,10 +19,11 @@
 #               --manual-layout. Exercises the manual install path end to end.
 #
 #               REUSE_ESP=1 (implies MANUAL=1) pre-partitions the disk from the
-#               live ISO with a 100 MiB FAT ESP holding a marker file, then
-#               installs into the remaining free space reusing that ESP. The
-#               post-install check asserts the marker survived (the ESP was not
-#               formatted) and rEFInd was installed onto it.
+#               live ISO with a 100 MiB FAT ESP holding a marker file and stale
+#               memtest86+ binaries, then installs into the remaining free space
+#               reusing that ESP. The post-install check asserts the marker
+#               survived (the ESP was not formatted), memtest was backed up, and
+#               rEFInd was installed onto it.
 #
 #               VERIFY=0 skip the post-install inspection of the installed system
 #               (verify-installed.sh runs it by default when VERIFY=1).
@@ -201,6 +202,11 @@ mkdir -p /mnt/reuse-esp
 # partition when the vfat module has not been loaded yet.
 mount -t vfat "$part" /mnt/reuse-esp
 printf 'aelum-dualboot-marker\n' > /mnt/reuse-esp/dualboot-marker.txt
+# Simulate another distro's memtest86+ package: pacman refuses to overwrite
+# these files unless the installer backs them up first.
+mkdir -p /mnt/reuse-esp/memtest86+
+printf 'stale memtest ia32\n' > /mnt/reuse-esp/memtest86+/memtest86ia32.efi
+printf 'stale memtest x64\n' > /mnt/reuse-esp/memtest86+/memtest86x64.efi
 umount /mnt/reuse-esp
 EOS
 }

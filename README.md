@@ -371,8 +371,9 @@ command with `--dry-run` appended.
 (a 512 MiB ESP plus a System partition filling the rest) from the guest's
 geometry and drives `--manual-layout` itself, so no hand-written JSON is needed.
 Add `REUSE_ESP=1` to pre-create a 100 MiB FAT ESP containing a marker file and
-install into the remaining free space reusing it. The post-install check then
-asserts the marker survived (the ESP was not formatted) and rEFInd was installed
+stale `memtest86+` binaries, then install into the remaining free space reusing
+it. The post-install check asserts the marker survived (the ESP was not
+formatted), the stale memtest files were backed up, and rEFInd was installed
 onto it — the full dualboot regression test:
 
 ```bash

@@ -201,13 +201,15 @@ if command -v efibootmgr >/dev/null 2>&1; then
 fi
 
 # ── Reused ESP (dualboot) ─────────────────────────────────────────────────────
-# REUSE_ESP=1 pre-creates the ESP and writes this marker before the install. If
-# the installer formatted the ESP (the bug this scenario guards against), the
-# marker is gone.
+# REUSE_ESP=1 pre-creates the ESP with a marker and stale memtest86+ binaries
+# before the install. If the installer formatted the ESP (the bug this scenario
+# guards against), the marker is gone.
 if [ "$REUSE_ESP" = "1" ]; then
     section "reused ESP (dualboot)"
     check "pre-existing ESP marker survived (ESP was not formatted)" test -f "$MNT/boot/dualboot-marker.txt"
     check "pre-existing ESP marker contents intact" grep -qx 'aelum-dualboot-marker' "$MNT/boot/dualboot-marker.txt"
+    check "pre-existing memtest was backed up" test -f "$MNT/boot/memtest86+/memtest86x64.efi.aelum-backup"
+    check "packaged memtest was installed" test -f "$MNT/boot/memtest86+/memtest86x64.efi"
 fi
 
 # ── Installed packages ────────────────────────────────────────────────────────
