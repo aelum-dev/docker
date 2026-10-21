@@ -168,9 +168,11 @@ theme_dir="$refind_dir/themes/aelum"
 check "Aelum theme config exists" test -f "$theme_dir/theme.conf"
 check "Aelum theme background exists" test -f "$theme_dir/background.png"
 check "Aelum theme font exists" test -f "$theme_dir/font.png"
+check "Aelum theme has a 2x font (4K/HiDPI)" test -f "$theme_dir/font-2x.png"
 check "Aelum theme icon exists" test -f "$theme_dir/icons/os_arch.png"
 check "Aelum theme selection highlight exists" test -f "$theme_dir/selection_big.png"
 check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space:]]+[0-9]+' "$conf"
+check "rEFInd sets an explicit or maximum display resolution" grep -Eq '^[[:space:]]*resolution[[:space:]]+([0-9]+[[:space:]]+[0-9]+|max)' "$conf"
 # rEFInd tokenizes refind.conf: unquoted options would be truncated to the first
 # word (dropping rw/splash and rewriting slashes), so require the quoted form.
 check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]]+"' "$conf"
