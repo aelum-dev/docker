@@ -163,6 +163,13 @@ check "rEFInd binary exists at EFI/refind/refind_x64.efi" test -f "$refind_dir/r
 conf="$refind_dir/refind.conf"
 check "rEFInd config exists at EFI/refind/refind.conf" test -f "$conf"
 check "rEFInd config has the Aelum menu entry" grep -Eq 'menuentry "Aelum"' "$conf"
+check "rEFInd config includes the Aelum theme" grep -Eq '^[[:space:]]*include[[:space:]]+themes/aelum/theme\.conf' "$conf"
+theme_dir="$refind_dir/themes/aelum"
+check "Aelum theme config exists" test -f "$theme_dir/theme.conf"
+check "Aelum theme background exists" test -f "$theme_dir/background.png"
+check "Aelum theme font exists" test -f "$theme_dir/font.png"
+check "Aelum theme icon exists" test -f "$theme_dir/icons/os_arch.png"
+check "Aelum theme selection highlight exists" test -f "$theme_dir/selection_big.png"
 check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space:]]+[0-9]+' "$conf"
 # rEFInd tokenizes refind.conf: unquoted options would be truncated to the first
 # word (dropping rw/splash and rewriting slashes), so require the quoted form.

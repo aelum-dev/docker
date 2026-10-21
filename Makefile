@@ -1,4 +1,4 @@
-.PHONY: help build image update dev attach stop clean \
+.PHONY: help build local-build build-local local-clean image update dev local-dev attach stop clean \
         release release-sign release-upload release-website wkd \
         run run-clean vm-clean test test-one test-boot test-matrix test-lvm
 
@@ -6,6 +6,12 @@ BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
 	BUILD_FLAGS:=--no-cache
 endif
+
+# The shell does not export UID/GID, so compose's ${UID:-1000} fallback would
+# hand the ISO to the wrong owner on hosts where the user is not 1000. Pass the
+# real ids explicitly; they are also used to chown the local-build stage back.
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
 
 ## Show usage
 help:
@@ -15,12 +21,15 @@ help:
 	@echo "  make image            Build & tag the toolchain image (aelum-image)"
 	@echo "  make image NO_CACHE=1 Force a fresh build (--no-cache)"
 	@echo "  make build            Build the ISO (reuses cached image) -> output/*.iso"
+	@echo "  make local-build      Build the ISO from local installer/ + live-iso/ (staged in /tmp)"
+	@echo "  make local-clean      Remove the staged local-build tree"
 	@echo "  make update           Rebuild toolchain from the latest Arch base (--no-cache)"
 	@echo ""
 	@echo "Interactive dev shell:"
 	@echo "  make dev              Start aelum-shell and drop into bash"
+	@echo "  make local-dev        Same shell, but builds from the local installer/ + live-iso/"
 	@echo "  make attach           Attach to the running aelum-shell"
-	@echo "  make stop             Stop aelum-shell"
+	@echo "  make stop             Stop the interactive shells"
 	@echo "  make clean            Stop + remove containers, prune anonymous volumes"
 	@echo ""
 	@echo "Release (sign -> R2 -> website):"
@@ -56,7 +65,47 @@ image:
 
 ## One-shot ISO build (reuses cached image layers by default)
 build:
-	docker compose run --rm aelum
+	docker compose run --rm \
+		-e OUTPUT_UID=$(HOST_UID) \
+		-e OUTPUT_GID=$(HOST_GID) \
+		aelum
+
+# Local build: build the ISO from the working trees next to docker/ instead of
+# cloning the published installer/live-iso repos. The trees are copied to
+# $(LOCAL_STAGE) and bind-mounted into the same one-shot container, so unpushed
+# changes are included and the repos themselves never collect root-owned build
+# artifacts. Output still lands in output/.
+#
+#   make local-build
+#   LOCAL_STAGE=/var/tmp/aelum-dev make local-build
+LOCAL_STAGE ?= /tmp/aelum-local-build
+LOCAL_STAGE_ABS := $(abspath $(LOCAL_STAGE))
+
+## Build the ISO from the local installer/ + live-iso/ working trees
+local-build:
+	@AELUM_LOCAL_STAGE="$(LOCAL_STAGE_ABS)" ./scripts/stage-local-repos.sh
+	@docker image inspect aelum-image >/dev/null 2>&1 || docker compose build
+	@echo "Building ISO from local repos in $(LOCAL_STAGE_ABS) (no git clone)"
+	docker compose run --rm \
+		-e OUTPUT_UID=$(HOST_UID) \
+		-e OUTPUT_GID=$(HOST_GID) \
+		-e SKIP_REPO_CLONE=1 \
+		-e CHOWN_WORKTREES=1 \
+		-v "$(LOCAL_STAGE_ABS)/live-iso:/app/live-iso" \
+		-v "$(LOCAL_STAGE_ABS)/installer:/app/installer" \
+		aelum
+
+# Kept as an alias: older notes/docs called this target build-local.
+build-local: local-build
+
+## Remove the staged local-build tree (/tmp by default)
+local-clean:
+	@rm -rf "$(LOCAL_STAGE_ABS)" 2>/dev/null || { \
+		echo "Removing root-owned staged files via aelum-image..."; \
+		docker run --rm -v "$(LOCAL_STAGE_ABS):/stage" aelum-image rm -rf /stage; \
+		rm -rf "$(LOCAL_STAGE_ABS)"; \
+	}
+	@echo "Removed $(LOCAL_STAGE_ABS)"
 
 # Rebuild the toolchain image from the newest Arch base and bake the updated
 # packages into it. The Dockerfile already runs `pacman -Syu`, but Docker's
@@ -64,8 +113,8 @@ build:
 # rebuild (no-cache) to re-pull the base and re-run the toolchain install.
 # The result is a saved, updated `aelum-image` for future builds.
 update:
-	docker compose stop aelum-shell 2>/dev/null || true
-	docker rm -f aelum aelum-shell 2>/dev/null || true
+	docker compose stop aelum-shell aelum-local-shell 2>/dev/null || true
+	docker rm -f aelum aelum-shell aelum-local-shell 2>/dev/null || true
 	docker rmi -f aelum-image 2>/dev/null || true
 	docker compose build --no-cache
 
@@ -78,6 +127,16 @@ dev:
 	docker compose up -d aelum-shell
 	docker exec -it aelum-shell bash || true
 
+## Start the local-repo dev shell (aelum-local-shell) and drop into bash.
+## Reuses the same container on every run, so pacman/AUR caches survive; inside,
+## run ./build-iso.sh after editing the host repos. Unlike local-build this
+## mounts the real repos, so build artifacts (work/, build/bin, mirror) appear
+## in them — build-iso.sh chowns them back to you after each run.
+local-dev:
+	@docker image inspect aelum-image >/dev/null 2>&1 || docker compose build
+	@OUTPUT_UID=$(HOST_UID) OUTPUT_GID=$(HOST_GID) docker compose up -d aelum-local-shell
+	docker exec -it aelum-local-shell bash || true
+
 ## Attach to the running aelum-shell (start it first with `make dev`)
 attach:
 	@if docker inspect -f '{{.State.Running}}' aelum-shell 2>/dev/null | grep -q true; then \
@@ -87,14 +146,14 @@ attach:
 		exit 1; \
 	fi
 
-## Stop the aelum-shell container
+## Stop the interactive shells
 stop:
-	docker compose stop aelum-shell
+	docker compose stop aelum-shell aelum-local-shell
 
 ## Stop + remove containers and prune anonymous volumes
 clean:
-	docker compose stop aelum-shell 2>/dev/null || true
-	docker rm -f aelum aelum-shell 2>/dev/null || true
+	docker compose stop aelum-shell aelum-local-shell 2>/dev/null || true
+	docker rm -f aelum aelum-shell aelum-local-shell 2>/dev/null || true
 	docker volume prune -f
 
 # ===========================================================================

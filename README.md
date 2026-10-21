@@ -25,9 +25,12 @@ The built ISO is written to the mounted `output/` directory.
 
 ## Requirements
 
-- Docker + Docker Compose
+- Linux host with rootful Docker (the build container is privileged) and the
+  Compose v2 plugin (`docker compose`, not the legacy `docker-compose`)
 - KVM support (for QEMU testing)
-- ~25 GB of free disk space for the build
+- ~25 GB of free disk space for the build; `make local-build` also needs ~15 GB
+  free in its staging directory (`/tmp` by default)
+- Network access for the Arch package download and AUR builds
 
 ## Build
 
@@ -43,6 +46,28 @@ builds skip it and only redo the clones, offline-cache download, and AUR builds.
 The pipeline then runs in a one-shot container and writes the ISO to `output/`.
 The output directory is bind-mounted from the host, and files are handed back to
 the host user automatically (via `OUTPUT_UID`/`OUTPUT_GID`, defaulting to `UID`/`GID`).
+
+### Build from your local repos (unpushed changes)
+
+`make build` clones the published `installer/` and `live-iso/` repos, so it
+ignores uncommitted work. To build (and then `make run`) an ISO with local
+changes, use:
+
+```bash
+make local-build
+```
+
+It copies `../installer` and `../live-iso` to `/tmp/aelum-local-build`
+(excluding `.git`, `live-iso/work`, the offline mirror cache, installer build
+output, and `node_modules`), bind-mounts those copies into the same one-shot
+container with `SKIP_REPO_CLONE=1`, and writes the ISO to `output/` as usual.
+Your real working trees are never written to: the container runs as root and
+only touches the staged copies. The stage stays in `/tmp` for inspection and is
+removed by `make local-clean`; `LOCAL_STAGE=...` moves it (use a filesystem
+with ~15 GB free if `/tmp` is a small tmpfs). If the repos are not siblings of
+`docker/`, point at them with `AELUM_LIVE_ISO_SRC=...` /
+`AELUM_INSTALLER_SRC=...`. `make build-local` is kept as an alias. For repeated iterations without
+restaging or losing the container's package cache, use `make local-dev`.
 
 ### Build the toolchain image only
 
@@ -86,10 +111,22 @@ To debug or work interactively:
 
 ```bash
 make dev        # start an interactive build container (aelum-shell)
-make attach     # attach to it later
-make stop       # stop the container
+make local-dev  # same, but builds from your local installer/ + live-iso/
+make attach     # attach to aelum-shell later
+make stop       # stop the interactive shells
 make clean      # stop + remove containers and prune volumes
 ```
+
+`make local-dev` creates a persistent `aelum-local-shell` container with your
+working trees bind-mounted at `/app/live-iso` and `/app/installer`, so inside
+the shell you can edit on the host and just re-run `./build-iso.sh` — it skips
+the GitHub clones and the container's pacman/AUR caches survive between runs.
+Re-running `make local-dev` re-attaches to the same container. Unlike
+`make local-build`, this mounts the real repos, so build outputs (`live-iso/work`,
+the offline mirror, `installer/build/bin`) do appear in them; the script chowns
+those back to you after each run. Use `make local-build` when you want an
+isolated copy in `/tmp` instead. Non-sibling checkouts can be pointed at with
+`AELUM_LIVE_ISO_SRC` / `AELUM_INSTALLER_SRC`.
 
 Or run the pipeline directly:
 
@@ -207,7 +244,7 @@ Launches the latest ISO in `output/` in QEMU with:
 - VirtIO GPU with GL (virgl), 1920×1080 (override with `XRES`/`YRES`)
 - OVMF UEFI firmware (`OVMF_VARS.fd`; created from the system template if missing)
 - 20G VirtIO virtual disk (`vdisk.qcow2`; created if missing)
-- Shared directory (`$HOME/Projects/shared`, mapped as `shared`)
+- Shared directory (`$HOME/Projects/shared` by default, override with `SHARED_DIR`, mapped as `shared`)
 - User-mode networking with SSH forwarded to host port 2222
 
 `OVMF_VARS.fd` and `vdisk.qcow2` are created on first run if absent.
@@ -407,10 +444,11 @@ the lists while iterating.
 ```
 .
 ├── Dockerfile                 # Build toolchain image (archlinux + tooling)
-├── docker-compose.yml         # aelum (build) + aelum-shell (interactive) services
+├── docker-compose.yml         # aelum (build) + aelum-shell / aelum-local-shell (interactive) services
 ├── Makefile                   # docker (build / image / update / dev / attach / stop / clean) # and qemu (run / run-clean / vm-clean / test / test-boot)
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
+│   ├── stage-local-repos.sh   # stage local installer/ + live-iso/ for local-build
 │   ├── run-iso.sh             # QEMU launch script
 │   ├── test-install.sh        # headless QEMU + installer-cli test
 │   ├── test-all.sh            # run the full install matrix, print a summary

@@ -31,3 +31,37 @@ services:
     volumes:
       - ./scripts/build-iso.sh:/app/build-iso.sh:ro
       - ./output:/app/live-iso/output
+
+  # `make local-dev`: the same warm, interactive shell as aelum-shell, but with
+  # the local installer/ + live-iso/ working trees mounted at /app instead of
+  # cloning them. SKIP_REPO_CLONE reuses those mounts on every ./build-iso.sh
+  # run; CHOWN_WORKTREES hands the build artifacts back to the host user.
+  aelum-local-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aelum-image
+    privileged: true
+    container_name: aelum-local-shell
+    tty: true
+    stdin_open: true
+    restart: "no"
+    entrypoint: ["/bin/bash"]
+    environment:
+      - OUTPUT_UID=${OUTPUT_UID:-1000}
+      - OUTPUT_GID=${OUTPUT_GID:-1000}
+      - SKIP_REPO_CLONE=1
+      - CHOWN_WORKTREES=1
+      # The mounted repos are owned by the host user while the container runs
+      # as root. Trust just those paths, otherwise git's "dubious ownership"
+      # check breaks `git describe` and Go's VCS stamping (go build).
+      - GIT_CONFIG_COUNT=2
+      - GIT_CONFIG_KEY_0=safe.directory
+      - GIT_CONFIG_VALUE_0=/app/live-iso
+      - GIT_CONFIG_KEY_1=safe.directory
+      - GIT_CONFIG_VALUE_1=/app/installer
+    volumes:
+      - ./scripts/build-iso.sh:/app/build-iso.sh:ro
+      - ${AELUM_LIVE_ISO_SRC:-../live-iso}:/app/live-iso
+      - ${AELUM_INSTALLER_SRC:-../installer}:/app/installer
+      - ./output:/app/live-iso/output

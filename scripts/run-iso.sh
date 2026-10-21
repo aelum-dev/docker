@@ -15,7 +15,7 @@ fi
 echo "Using ISO: $ISO"
 
 # --- Shared Directory ---
-SHARED_DIR="$HOME/Projects/shared"
+SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"
 mkdir -p "$SHARED_DIR"
 
 # --- UEFI firmware setup ---

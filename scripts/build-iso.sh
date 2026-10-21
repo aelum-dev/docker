@@ -41,6 +41,36 @@ else
     rm -rf "$TMP_INSTALLER"
 fi
 
+# Fresh clones are dropped into the same directories the local-repo build
+# bind-mounts (see make local-build). Either way the rest of the script works on
+# /app/live-iso + /app/installer.
+
+# Local builds (`make local-build`) bind-mount staged host trees into the
+# container. This script runs as root and writes into them (offline mirror,
+# work/, build/bin), so hand them back to the host user on exit — including on
+# failure — or the next staging pass cannot replace root-owned files.
+if [ "${CHOWN_WORKTREES:-0}" = "1" ]; then
+    OUT_UID="${OUTPUT_UID:-1000}"
+    OUT_GID="${OUTPUT_GID:-1000}"
+    chown_worktrees() {
+        chown -R "${OUT_UID}:${OUT_GID}" "$LIVE_ISO_DIR" "$INSTALLER_DIR" 2>/dev/null || true
+    }
+    trap chown_worktrees EXIT
+    # Bash does not run EXIT traps on SIGTERM/SIGINT by default; turn both into
+    # a normal exit so an interrupted `make local-build` still hands the staged
+    # trees back (otherwise the next staging pass needs the container fallback).
+    trap 'exit 143' TERM INT
+
+    # The bind-mounted repos are owned by the host user while this script runs
+    # as root. Without this, git reports "dubious ownership", `git describe`
+    # yields nothing, and `go build`'s VCS stamping aborts the installer build.
+    export GIT_CONFIG_COUNT=2
+    export GIT_CONFIG_KEY_0=safe.directory
+    export GIT_CONFIG_VALUE_0="$LIVE_ISO_DIR"
+    export GIT_CONFIG_KEY_1=safe.directory
+    export GIT_CONFIG_VALUE_1="$INSTALLER_DIR"
+fi
+
 export PATH="$HOME/go/bin:$PATH"
 
 # Refresh the base system and sync database before anything else.
