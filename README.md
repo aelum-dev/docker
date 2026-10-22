@@ -409,12 +409,15 @@ the `aelum` VG, mounts the installed root read-only, and asserts
 - the VG exists with exactly two LVs (`root`, `home`) and the PV is the system
   partition (or the LUKS mapper);
 - the root and home filesystems match `FILESYSTEM`;
-- `/etc/fstab` mounts `/`, `/boot`, and (LVM or btrfs) `/home` correctly, with
-  the right UUIDs and the `@home` subvolume where applicable;
+- `/etc/fstab` mounts `/`, the ESP at `/efi`, this install's `aelum/<id>/` boot
+  directory at `/boot` (bind), and (LVM or btrfs) `/home` correctly, with the
+  right UUIDs and the `@home` subvolume where applicable;
 - `/etc/mkinitcpio.conf` `HOOKS` include `lvm2` (LVM) and an encrypt hook (LUKS);
-- rEFInd is installed at `EFI/refind/refind_x64.efi` with an `Aelum`
-  `refind.conf` menu entry whose options root at `/dev/mapper/aelum-root` (LVM),
-  carry `rd.luks.name=` (LUKS), and add `rootflags=subvol=@` only for btrfs.
+- rEFInd is installed at `EFI/refind/refind_x64.efi` with a per-install menu
+  fragment at `EFI/refind/aelum/<id>.conf` (included from `refind.conf`) that
+  loads this install's own kernel/initramfs from `aelum/<id>/`; its options root
+  at `/dev/mapper/aelum-root` (LVM), carry `rd.luks.name=` (LUKS), and add
+  `rootflags=subvol=@` only for btrfs.
 
 `verify-installed.sh` never calls the installer, so it validates the on-disk
 result rather than the code that produced it. Set `VERIFY=0` to skip it.

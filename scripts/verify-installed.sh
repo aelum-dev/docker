@@ -110,11 +110,18 @@ if [ "$FILESYSTEM" = btrfs ]; then
 else
     mount -o ro "$rootdev" "$MNT" || { echo "FATAL: could not mount $rootdev"; exit 1; }
 fi
-mkdir -p "$MNT/boot"
+
+# The installed system mounts the ESP at /efi and its per-install boot
+# directory (aelum/<id>) at /boot. Mount the ESP at the path fstab uses so
+# rEFInd files and this install's kernel images are reachable directly.
+root_uuid="$(blkid -o value -s UUID "$rootdev")"
+install_id="$(printf '%s' "$root_uuid" | tr -d '[:punct:]' | tr '[:upper:]' '[:lower:]' | cut -c1-8)"
+mkdir -p "$MNT/efi"
 # Name the filesystem type: the kernel probe can miss a FAT partition when the
 # vfat module has not been loaded yet.
-mount -t vfat -o ro "$ESP" "$MNT/boot" 2>/dev/null \
+mount -t vfat -o ro "$ESP" "$MNT/efi" 2>/dev/null \
     || echo "  note - could not mount ESP read-only; boot-entry checks may fail"
+boot_dir="$MNT/efi/aelum/$install_id"
 
 # ── Filesystems ───────────────────────────────────────────────────────────────
 section "Filesystems"
@@ -128,8 +135,10 @@ fi
 section "fstab"
 check "fstab exists and is non-empty" [ -s "$MNT/etc/fstab" ]
 check "fstab mounts / as $FILESYSTEM" fstab_has "^UUID=[0-9a-fA-F-]+[[:space:]]+/[[:space:]]+$FILESYSTEM"
-check "fstab mounts /boot as vfat" fstab_has "/boot[[:space:]]+vfat"
-root_uuid="$(blkid -o value -s UUID "$rootdev")"
+esp_uuid="$(blkid -o value -s UUID "$ESP")"
+check "fstab mounts the ESP at /efi as vfat" fstab_has "^UUID=$esp_uuid[[:space:]]+/efi[[:space:]]+vfat"
+check "fstab bind-mounts this install's boot dir at /boot" \
+    fstab_has "^/efi/aelum/$install_id[[:space:]]+/boot[[:space:]]+none[[:space:]]+bind"
 check "fstab references the root filesystem UUID" fstab_has "$root_uuid"
 if [ "$LVM" = 1 ]; then
     home_uuid="$(blkid -o value -s UUID "$homedev")"
@@ -158,11 +167,26 @@ fi
 
 # ── Bootloader (rEFInd) ───────────────────────────────────────────────────────
 section "bootloader"
-refind_dir="$MNT/boot/EFI/refind"
+refind_dir="$MNT/efi/EFI/refind"
 check "rEFInd binary exists at EFI/refind/refind_x64.efi" test -f "$refind_dir/refind_x64.efi"
 conf="$refind_dir/refind.conf"
 check "rEFInd config exists at EFI/refind/refind.conf" test -f "$conf"
-check "rEFInd config has the Aelum menu entry" grep -Eq 'menuentry "Aelum"' "$conf"
+# Each Aelum install owns a menu fragment under EFI/refind/aelum, keyed by a
+# short form of its root filesystem UUID, so two installs can share one ESP.
+entry="$refind_dir/aelum/$install_id.conf"
+check "rEFInd config includes this install's menu entry (aelum/$install_id.conf)" \
+    grep -Eq "^[[:space:]]*include[[:space:]]+aelum/$install_id\\.conf" "$conf"
+check "rEFInd menu entry exists at EFI/refind/aelum/$install_id.conf" test -f "$entry"
+expected_title="Aelum ($(basename "$ROOT_PART"))"
+check "rEFInd menu entry is titled \"$expected_title\"" grep -Fq "menuentry \"$expected_title\"" "$entry"
+# Kernel and initramfs live in this install's own directory on the ESP, so a
+# second Aelum install cannot overwrite them.
+check "rEFInd entry loads this install's kernel (aelum/$install_id)" \
+    grep -Eq "^[[:space:]]*loader[[:space:]]+/aelum/$install_id/vmlinuz" "$entry"
+check "rEFInd entry loads this install's initramfs (aelum/$install_id)" \
+    grep -Eq "^[[:space:]]*initrd[[:space:]]+/aelum/$install_id/initramfs" "$entry"
+check "this install's kernel exists on the ESP" compgen -G "$boot_dir/vmlinuz-*" >/dev/null
+check "this install's initramfs exists on the ESP" compgen -G "$boot_dir/initramfs-*.img" >/dev/null
 check "rEFInd config includes the Aelum theme" grep -Eq '^[[:space:]]*include[[:space:]]+themes/aelum/theme\.conf' "$conf"
 theme_dir="$refind_dir/themes/aelum"
 check "Aelum theme config exists" test -f "$theme_dir/theme.conf"
@@ -175,9 +199,9 @@ check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space
 check "rEFInd sets an explicit or maximum display resolution" grep -Eq '^[[:space:]]*resolution[[:space:]]+([0-9]+[[:space:]]+[0-9]+|max)' "$conf"
 # rEFInd tokenizes refind.conf: unquoted options would be truncated to the first
 # word (dropping rw/splash and rewriting slashes), so require the quoted form.
-check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]]+"' "$conf"
+check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]]+"' "$entry"
 # The Aelum stanza's kernel command line (indented `options` line).
-opts="$(grep -E '^[[:space:]]*options[[:space:]]+' "$conf" 2>/dev/null | head -1)"
+opts="$(grep -E '^[[:space:]]*options[[:space:]]+' "$entry" 2>/dev/null | head -1)"
 echo "  $opts"
 if [ "$LVM" = 1 ]; then
     check "entry roots at the root LV (/dev/mapper/aelum-root)" has "$opts" 'root=/dev/mapper/aelum-root'
@@ -206,10 +230,10 @@ fi
 # guards against), the marker is gone.
 if [ "$REUSE_ESP" = "1" ]; then
     section "reused ESP (dualboot)"
-    check "pre-existing ESP marker survived (ESP was not formatted)" test -f "$MNT/boot/dualboot-marker.txt"
-    check "pre-existing ESP marker contents intact" grep -qx 'aelum-dualboot-marker' "$MNT/boot/dualboot-marker.txt"
-    check "pre-existing memtest was backed up" test -f "$MNT/boot/memtest86+/memtest86x64.efi.aelum-backup"
-    check "packaged memtest was installed" test -f "$MNT/boot/memtest86+/memtest86x64.efi"
+    check "pre-existing ESP marker survived (ESP was not formatted)" test -f "$MNT/efi/dualboot-marker.txt"
+    check "pre-existing ESP marker contents intact" grep -qx 'aelum-dualboot-marker' "$MNT/efi/dualboot-marker.txt"
+    check "pre-existing memtest was backed up" test -f "$MNT/efi/memtest86+/memtest86x64.efi.aelum-backup"
+    check "packaged memtest was installed" test -f "$MNT/efi/memtest86+/memtest86x64.efi"
 fi
 
 # ── Installed packages ────────────────────────────────────────────────────────
