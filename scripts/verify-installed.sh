@@ -193,9 +193,24 @@ check "Aelum theme config exists" test -f "$theme_dir/theme.conf"
 check "Aelum theme background exists" test -f "$theme_dir/background.png"
 check "Aelum theme font exists" test -f "$theme_dir/font.png"
 check "Aelum theme has a 2x font (4K/HiDPI)" test -f "$theme_dir/font-2x.png"
-# The Aelum mark plus the Nerd Font glyph icons for auto-detected loaders:
-# Arch/systemd-boot, Windows, Ventoy, and generic Linux/GRUB.
-for icon in os_arch os_linux os_win os_win8 os_systemd os_gummiboot os_ventoy os_vtoyefi; do
+# rEFInd falls back to its stock artwork for any name missing here, so require
+# the full themed set: OS tiles, tools/functions, volume badges, and the
+# arrow/mouse/boot chrome.
+for icon in \
+    os_arch os_artful os_bionic os_centos os_chakra os_chrome os_clover \
+    os_crunchbang os_debian os_devuan os_elementary os_endeavouros os_fedora \
+    os_freebsd os_frugalware os_gentoo os_gummiboot os_haiku os_hwtest \
+    os_kubuntu os_legacy os_linux os_linuxmint os_lubuntu os_mac os_mageia \
+    os_mandriva os_manjaro os_netbsd os_network os_opensuse os_redhat \
+    os_refind os_refit os_slackware os_suse os_systemd os_trusty os_ubuntu \
+    os_uefi os_unknown os_void os_win os_win8 os_xenial os_xubuntu os_zesty \
+    os_ventoy os_vtoyefi \
+    func_about func_bootorder func_csr_rotate func_exit func_firmware \
+    func_hidden func_install func_reset func_shutdown \
+    tool_apple_rescue tool_fwupdate tool_memtest tool_mok_tool tool_netboot \
+    tool_part tool_rescue tool_shell tool_windows_rescue \
+    vol_efi vol_external vol_internal vol_net vol_optical \
+    arrow_left arrow_right mouse boot_linux boot_win transparent; do
     check "Aelum theme icon $icon.png exists" test -f "$theme_dir/icons/$icon.png"
 done
 check "Aelum and generic Linux icons are distinct" \
