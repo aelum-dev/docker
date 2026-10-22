@@ -197,6 +197,10 @@ check "Aelum theme icon exists" test -f "$theme_dir/icons/os_arch.png"
 check "Aelum theme selection highlight exists" test -f "$theme_dir/selection_big.png"
 check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space:]]+[0-9]+' "$conf"
 check "rEFInd sets an explicit or maximum display resolution" grep -Eq '^[[:space:]]*resolution[[:space:]]+([0-9]+[[:space:]]+[0-9]+|max)' "$conf"
+# Without this, rEFInd switches to text mode and prints "Booting ..." and
+# "Using load options ..." over a black screen before the kernel starts.
+check "rEFInd launches Linux in graphics mode (no pre-launch text)" \
+    grep -Eq '^[[:space:]]*use_graphics_for[[:space:]]+.*linux' "$conf"
 # rEFInd tokenizes refind.conf: unquoted options would be truncated to the first
 # word (dropping rw/splash and rewriting slashes), so require the quoted form.
 check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]]+"' "$entry"
