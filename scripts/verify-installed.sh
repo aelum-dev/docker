@@ -193,7 +193,13 @@ check "Aelum theme config exists" test -f "$theme_dir/theme.conf"
 check "Aelum theme background exists" test -f "$theme_dir/background.png"
 check "Aelum theme font exists" test -f "$theme_dir/font.png"
 check "Aelum theme has a 2x font (4K/HiDPI)" test -f "$theme_dir/font-2x.png"
-check "Aelum theme icon exists" test -f "$theme_dir/icons/os_arch.png"
+# The Aelum mark plus the Nerd Font glyph icons for auto-detected loaders:
+# Arch/systemd-boot, Windows, Ventoy, and generic Linux/GRUB.
+for icon in os_arch os_linux os_win os_win8 os_systemd os_gummiboot os_ventoy os_vtoyefi; do
+    check "Aelum theme icon $icon.png exists" test -f "$theme_dir/icons/$icon.png"
+done
+check "Aelum and generic Linux icons are distinct" \
+    [ "$(md5sum "$theme_dir/icons/os_arch.png" | cut -d' ' -f1)" != "$(md5sum "$theme_dir/icons/os_linux.png" | cut -d' ' -f1)" ]
 check "Aelum theme selection highlight exists" test -f "$theme_dir/selection_big.png"
 check "rEFInd config sets a menu timeout" grep -Eq '^[[:space:]]*timeout[[:space:]]+[0-9]+' "$conf"
 check "rEFInd sets an explicit or maximum display resolution" grep -Eq '^[[:space:]]*resolution[[:space:]]+([0-9]+[[:space:]]+[0-9]+|max)' "$conf"
