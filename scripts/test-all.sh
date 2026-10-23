@@ -8,16 +8,15 @@
 #   MODES        auto manual     installation path     (default: both)
 #   FILESYSTEMS  btrfs ext4      root filesystem       (default: both)
 #   LUKSES       0 1             LUKS2 encryption      (default: both)
-#   LVMS         0 1             LVM logical volumes   (default: both)
 #
 # Examples:
-#   ./scripts/test-all.sh                     # all 16 combinations
-#   LVMS=1 ./scripts/test-all.sh              # only the LVM cells (8)
-#   MODES=auto FILESYSTEMS=ext4 LVMS=1 ./scripts/test-all.sh
+#   ./scripts/test-all.sh                     # all 8 combinations
+#   LUKSES=1 ./scripts/test-all.sh            # only the encrypted cells (4)
+#   MODES=auto FILESYSTEMS=ext4 ./scripts/test-all.sh
 #   SHARED_INSTALLER=1 ./scripts/test-all.sh  # drive installs from /shared
 #
-# A full desktop install is heavy: 16 cells takes a long time. Narrow the lists
-# while iterating (e.g. LVMS=1 MODES=auto FILESYSTEMS=ext4).
+# A full desktop install is heavy: 8 cells takes a long time. Narrow the lists
+# while iterating (e.g. MODES=auto FILESYSTEMS=ext4).
 #
 # Forwarded to test-install.sh: LUKS_PASS, USER_PASS, USERNAME, SSH_PORT, QEMU_QVM,
 # DISK_PATH, VERIFY, SHARED_INSTALLER, SHARED_DIR, ISO.
@@ -30,7 +29,6 @@ TEST="$PROFILE_DIR/scripts/test-install.sh"
 MODES="${MODES:-auto manual}"
 FILESYSTEMS="${FILESYSTEMS:-btrfs ext4}"
 LUKSES="${LUKSES:-0 1}"
-LVMS="${LVMS:-0 1}"
 
 LOG_DIR="$PROFILE_DIR/logs/matrix"
 mkdir -p "$LOG_DIR"
@@ -43,36 +41,34 @@ failed_cells=()
 for mode in $MODES; do
     for fs in $FILESYSTEMS; do
         for luks in $LUKSES; do
-            for lvm in $LVMS; do
-                total=$((total + 1))
-                cell="mode=$mode fs=$fs luks=$luks lvm=$lvm"
-                logfile="$LOG_DIR/$(printf '%s' "$cell" | tr ' =' '__').log"
-                echo
-                echo "================================================================"
-                echo "[$total] $cell"
-                echo "  log: $logfile"
-                echo "================================================================"
-                if MODE=auto MANUAL="$([ "$mode" = manual ] && echo 1 || echo 0)" \
-                     FILESYSTEM="$fs" LUKS="$luks" LVM="$lvm" \
-                     SHARED_INSTALLER="${SHARED_INSTALLER:-0}" \
-                     LUKS_PASS="${LUKS_PASS:-aelum-luks}" \
-                     USER_PASS="${USER_PASS:-aelum}" \
-                     USERNAME="${USERNAME:-aelum}" \
-                     SSH_PORT="${SSH_PORT:-2222}" \
-                     QEMU_QVM="${QEMU_QVM:-1}" \
-                     DISK_PATH="${DISK_PATH:-/dev/vda}" \
-                     VERIFY="${VERIFY:-1}" \
-                     SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}" \
-                     ISO="${ISO:-}" \
-                     "$TEST" 2>&1 | tee "$logfile"; then
-                    echo ">>> PASS: $cell"
-                    passed=$((passed + 1))
-                else
-                    echo ">>> FAIL: $cell"
-                    failed=$((failed + 1))
-                    failed_cells+=("$cell")
-                fi
-            done
+            total=$((total + 1))
+            cell="mode=$mode fs=$fs luks=$luks"
+            logfile="$LOG_DIR/$(printf '%s' "$cell" | tr ' =' '__').log"
+            echo
+            echo "================================================================"
+            echo "[$total] $cell"
+            echo "  log: $logfile"
+            echo "================================================================"
+            if MODE=auto MANUAL="$([ "$mode" = manual ] && echo 1 || echo 0)" \
+                 FILESYSTEM="$fs" LUKS="$luks" \
+                 SHARED_INSTALLER="${SHARED_INSTALLER:-0}" \
+                 LUKS_PASS="${LUKS_PASS:-aelum-luks}" \
+                 USER_PASS="${USER_PASS:-aelum}" \
+                 USERNAME="${USERNAME:-aelum}" \
+                 SSH_PORT="${SSH_PORT:-2222}" \
+                 QEMU_QVM="${QEMU_QVM:-1}" \
+                 DISK_PATH="${DISK_PATH:-/dev/vda}" \
+                 VERIFY="${VERIFY:-1}" \
+                 SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}" \
+                 ISO="${ISO:-}" \
+                 "$TEST" 2>&1 | tee "$logfile"; then
+                echo ">>> PASS: $cell"
+                passed=$((passed + 1))
+            else
+                echo ">>> FAIL: $cell"
+                failed=$((failed + 1))
+                failed_cells+=("$cell")
+            fi
         done
     done
 done

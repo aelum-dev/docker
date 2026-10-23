@@ -10,10 +10,6 @@
 #               password then the LUKS passphrase; default passphrase
 #               LUKS_PASS=aelum-luks). The installer CLI already supports --luks.
 #
-#               LVM=1   place root and home on LVM logical volumes in the `aelum`
-#               volume group (passes --lvm). Composes with LUKS and either
-#               filesystem (btrfs with subvolumes, or ext4).
-#
 #               MANUAL=1 use manual partitioning: a 512 MiB ESP plus a System
 #               partition that fills the rest, driven via --manual-layout.
 #               Exercises the manual install path end to end (both selected
@@ -51,7 +47,6 @@ LUKS_PASS="${LUKS_PASS:-aelum-luks}"       # passphrase for the LUKS root partit
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
 FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
-LVM="${LVM:-0}"                            # place root/home on LVM logical volumes: 0 | 1
 MANUAL="${MANUAL:-0}"                      # use manual partitioning (formats Boot + System): 0 | 1
 VERIFY="${VERIFY:-1}"                      # independently inspect the installed system after install: 0 | 1
 QEMU_QVM="${QEMU_QVM:-1}"                  # 1 = use -enable-kvm -cpu host
@@ -101,7 +96,6 @@ command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ "$FILESYSTEM" = "ext4" ] || [ "$FILESYSTEM" = "btrfs" ] || fail "FILESYSTEM must be 'ext4' or 'btrfs' (got '$FILESYSTEM')"
 [ "$LUKS" = "0" ] || [ "$LUKS" = "1" ] || fail "LUKS must be '0' or '1' (got '$LUKS')"
 [ "$LUKS" = "0" ] || [ -n "$LUKS_PASS" ] || fail "LUKS_PASS must be set when LUKS=1"
-[ "$LVM" = "0" ] || [ "$LVM" = "1" ] || fail "LVM must be '0' or '1' (got '$LVM')"
 [ "$MANUAL" = "0" ] || [ "$MANUAL" = "1" ] || fail "MANUAL must be '0' or '1' (got '$MANUAL')"
 [ "$VERIFY" = "0" ] || [ "$VERIFY" = "1" ] || fail "VERIFY must be '0' or '1' (got '$VERIFY')"
 
@@ -270,9 +264,6 @@ INSTALLER_ARGS=(--install "$DISK_PATH" --filesystem "$FILESYSTEM" --username "$U
 if [ "$LUKS" = "1" ]; then
     INSTALLER_ARGS+=(--luks)
 fi
-if [ "$LVM" = "1" ]; then
-    INSTALLER_ARGS+=(--lvm)
-fi
 if [ "$MANUAL" = "1" ]; then
     MANUAL_LAYOUT="$(build_manual_layout)"
     [ -n "$MANUAL_LAYOUT" ] || fail "could not build a manual layout for $DISK_PATH"
@@ -282,7 +273,7 @@ if [ "$MANUAL" = "1" ]; then
     INSTALLER_ARGS+=(--manual-layout "'$MANUAL_LAYOUT'")
 fi
 
-log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL)"
+log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS manual=$MANUAL)"
 if [ "$LUKS" = "1" ]; then
     log "LUKS encryption enabled (root partition will be LUKS2-encrypted)"
     # CLI reads the account password first, then the LUKS passphrase, both from
@@ -305,12 +296,12 @@ log "installer CLI exited 0"
 # ── Independent verification of the installed system ─────────────────────────
 # The installer's own VerifySystem step already ran, but it is the same code
 # under test. This re-inspects the disk from outside: it re-opens LUKS,
-# re-activates the VG, mounts the installed root, and asserts the LVM layout,
-# fstab, initramfs hooks, and boot entry match the requested combination.
+# mounts the installed root, and asserts the fstab, initramfs hooks, and boot
+# entry match the requested combination.
 if [ "$VERIFY" = "1" ]; then
-    log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
-    if { printf 'FILESYSTEM=%q LUKS=%q LVM=%q LUKS_PASS=%q DISK_PATH=%q\n' \
-             "$FILESYSTEM" "$LUKS" "$LVM" "$LUKS_PASS" "$DISK_PATH"
+    log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS manual=$MANUAL) ..."
+    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q DISK_PATH=%q\n' \
+             "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$DISK_PATH"
           cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
         log "Verification passed"

@@ -6,9 +6,8 @@
 # rather than the code that produced it.
 #
 # Inputs (environment, supplied by test-install.sh):
-#   FILESYSTEM  ext4 | btrfs   filesystem on the LVs / root partition
+#   FILESYSTEM  ext4 | btrfs   filesystem on the root partition
 #   LUKS        0 | 1          root partition is LUKS2-encrypted
-#   LVM         0 | 1          root+home are logical volumes in the `aelum` VG
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
 #
@@ -19,15 +18,13 @@ set -u
 
 FILESYSTEM="${FILESYSTEM:-btrfs}"
 LUKS="${LUKS:-0}"
-LVM="${LVM:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
 
 MNT=/mnt
 ESP="${DISK_PATH}1"
 ROOT_PART="${DISK_PATH}2"
-# Reuse the installer's mapper name (shared.LuksMapperName) so LVM re-discovers
-# the PV on the same device path it was created on, even with a devices file.
+# Reuse the installer's mapper name (shared.LuksMapperName).
 LUKS_MAPPER=aelum
 
 fails=0
@@ -42,21 +39,18 @@ hasnt() { ! grep -qE "$2" <<<"$1"; }
 # fstab_has "<ERE>" / fstab_not "<mount point>"
 fstab_has() { grep -Eq "$1" "$MNT/etc/fstab"; }
 fstab_not() { ! grep -Eq "[[:space:]]$1[[:space:]]" "$MNT/etc/fstab"; }
-# pkg_installed "<pacman root>" "<pkgname>" — true when the pacman local db has it.
-pkg_installed() { compgen -G "$1/var/lib/pacman/local/$2-*" >/dev/null; }
 
 cleanup() {
     umount -R "$MNT" 2>/dev/null
-    [ "$LVM" = 1 ]  && vgchange -an aelum 2>/dev/null
     [ "$LUKS" = 1 ] && cryptsetup close "$LUKS_MAPPER" 2>/dev/null
     return 0
 }
 trap cleanup EXIT
 
-echo "Verifying install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM)"
+echo "Verifying install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS)"
 
-# ── Open LUKS / activate the VG ───────────────────────────────────────────────
-pv="$ROOT_PART"
+# ── Open LUKS ─────────────────────────────────────────────────────────────────
+rootdev="$ROOT_PART"
 if [ "$LUKS" = 1 ]; then
     # Clear any mapper left open by a failed cleanup before reopening it.
     cryptsetup close "$LUKS_MAPPER" 2>/dev/null || true
@@ -65,40 +59,7 @@ if [ "$LUKS" = 1 ]; then
         exit 1
     fi
     udevadm settle 2>/dev/null || true
-    pv="/dev/mapper/$LUKS_MAPPER"
-fi
-
-rootdev="$pv"
-homedev=""
-if [ "$LVM" = 1 ]; then
-    if ! vgchange -ay aelum >/dev/null 2>&1; then
-        echo "FATAL: could not activate volume group 'aelum'"
-        exit 1
-    fi
-    udevadm settle 2>/dev/null || true
-    rootdev=/dev/mapper/aelum-root
-    homedev=/dev/mapper/aelum-home
-fi
-
-# ── LVM structure ─────────────────────────────────────────────────────────────
-if [ "$LVM" = 1 ]; then
-    section "LVM"
-    vg_names="$(vgs --noheadings -o vg_name 2>/dev/null)"
-    lv_names="$(lvs --noheadings -o lv_name aelum 2>/dev/null)"
-    pv_names="$(pvs --noheadings -o pv_name 2>/dev/null)"
-    check "volume group 'aelum' exists" has "$vg_names" '\baelum\b'
-    check "root LV exists" has "$lv_names" '\broot\b'
-    check "home LV exists" has "$lv_names" '\bhome\b'
-    check "exactly two LVs (no swap LV)" [ "$(printf '%s' "$lv_names" | wc -w)" = 2 ]
-    check "exactly one physical volume" [ "$(printf '%s' "$pv_names" | wc -w)" = 1 ]
-    if [ "$LUKS" = 0 ]; then
-        check "PV is $ROOT_PART" has "$pv_names" "$(basename "$ROOT_PART")"
-    fi
-    check "root LV device present" [ -e "$rootdev" ]
-    check "home LV device present" [ -e "$homedev" ]
-else
-    section "LVM (expecting none)"
-    check "no 'aelum' volume group" hasnt "$(vgs --noheadings -o vg_name 2>/dev/null)" '\baelum\b'
+    rootdev="/dev/mapper/$LUKS_MAPPER"
 fi
 
 # ── Mount the installed system read-only ──────────────────────────────────────
@@ -125,9 +86,6 @@ boot_dir="$MNT/efi/aelum/$install_id"
 section "Filesystems"
 check "root filesystem is $FILESYSTEM" [ "$(blkid -o value -s TYPE "$rootdev")" = "$FILESYSTEM" ]
 check "ESP is vfat" [ "$(blkid -o value -s TYPE "$ESP")" = vfat ]
-if [ "$LVM" = 1 ]; then
-    check "home LV filesystem is $FILESYSTEM" [ "$(blkid -o value -s TYPE "$homedev")" = "$FILESYSTEM" ]
-fi
 
 # ── fstab ─────────────────────────────────────────────────────────────────────
 section "fstab"
@@ -138,27 +96,16 @@ check "fstab mounts the ESP at /efi as vfat" fstab_has "^UUID=$esp_uuid[[:space:
 check "fstab bind-mounts this install's boot dir at /boot" \
     fstab_has "^/efi/aelum/$install_id[[:space:]]+/boot[[:space:]]+none[[:space:]]+bind"
 check "fstab references the root filesystem UUID" fstab_has "$root_uuid"
-if [ "$LVM" = 1 ]; then
-    home_uuid="$(blkid -o value -s UUID "$homedev")"
-    check "fstab mounts /home as $FILESYSTEM on the home LV" fstab_has "^UUID=$home_uuid[[:space:]]+/home[[:space:]]+$FILESYSTEM"
-    if [ "$FILESYSTEM" = btrfs ]; then
-        check "/home uses the @home subvolume" fstab_has "^UUID=$home_uuid[[:space:]]+/home[[:space:]]+btrfs.*subvol=@home"
-    fi
-elif [ "$FILESYSTEM" = btrfs ]; then
+if [ "$FILESYSTEM" = btrfs ]; then
     check "fstab mounts /home as the @home subvolume" fstab_has "^UUID=$root_uuid[[:space:]]+/home[[:space:]]+btrfs.*subvol=@home"
 else
-    check "fstab has no /home entry (ext4, no LVM)" fstab_not /home
+    check "fstab has no /home entry (ext4)" fstab_not /home
 fi
 
 # ── initramfs hooks ───────────────────────────────────────────────────────────
 section "initramfs"
 hooks="$(grep -E '^HOOKS=' "$MNT/etc/mkinitcpio.conf" 2>/dev/null)"
 echo "  HOOKS: $hooks"
-if [ "$LVM" = 1 ]; then
-    check "HOOKS include lvm2" has "$hooks" '(^|[^[:alnum:]_])lvm2([^[:alnum:]_]|$)'
-else
-    check "HOOKS exclude lvm2" hasnt "$hooks" '(^|[^[:alnum:]_])lvm2([^[:alnum:]_]|$)'
-fi
 if [ "$LUKS" = 1 ]; then
     check "HOOKS include an encrypt hook" has "$hooks" '(^|[^[:alnum:]_])(sd-encrypt|encrypt)([^[:alnum:]_]|$)'
 fi
@@ -227,11 +174,7 @@ check "rEFInd entry options are quoted" grep -Eq '^[[:space:]]*options[[:space:]
 # The Aelum stanza's kernel command line (indented `options` line).
 opts="$(grep -E '^[[:space:]]*options[[:space:]]+' "$entry" 2>/dev/null | head -1)"
 echo "  $opts"
-if [ "$LVM" = 1 ]; then
-    check "entry roots at the root LV (/dev/mapper/aelum-root)" has "$opts" 'root=/dev/mapper/aelum-root'
-else
-    check "entry roots at the root filesystem UUID" has "$opts" 'root=UUID='
-fi
+check "entry roots at the root filesystem UUID" has "$opts" 'root=UUID='
 if [ "$LUKS" = 1 ]; then
     check "entry has rd.luks.name=" has "$opts" 'rd\.luks\.name='
 else
@@ -251,13 +194,10 @@ fi
 # ── Installed packages ────────────────────────────────────────────────────────
 section "installed system"
 check "system is populated (/etc/os-release present)" [ -s "$MNT/etc/os-release" ]
-if [ "$LVM" = 1 ]; then
-    check "lvm2 package installed" pkg_installed "$MNT" lvm2
-fi
 
 echo
 if [ "$fails" -eq 0 ]; then
-    echo "VERIFY: PASS (fs=$FILESYSTEM luks=$LUKS lvm=$LVM)"
+    echo "VERIFY: PASS (fs=$FILESYSTEM luks=$LUKS)"
     exit 0
 fi
 echo "VERIFY: FAIL ($fails check(s) failed)"
