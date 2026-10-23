@@ -50,8 +50,7 @@ help:
 	@echo "  make test-one         Run a single install, stop (MODE=auto, FILESYSTEM=btrfs)"
 	@echo "  make test-one LUKS=1  single LUKS2-encrypted install"
 	@echo "  make test-one LVM=1   single install on LVM logical volumes"
-	@echo "  make test-one MANUAL=1  single dualboot-safe manual install"
-	@echo "  make test-one MANUAL=1 REUSE_ESP=1  reuse a pre-made 100 MiB ESP"
+	@echo "  make test-one MANUAL=1  single manual install (formats Boot + System)"
 	@echo "  make test-lvm         Run only the LVM cells of the matrix"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 
@@ -231,15 +230,13 @@ test: test-matrix
 ##   LUKS=1 make test-one                 # encrypt the root partition with LUKS2
 ##   LUKS_PASS=... make test-one          # LUKS passphrase (default aelum-luks)
 ##   LVM=1 make test-one                  # place root+home on LVM logical volumes
-##   MANUAL=1 make test-one               # dualboot-safe manual partitioning
-##   MANUAL=1 REUSE_ESP=1 make test-one   # reuse a pre-made 100 MiB ESP (dualboot)
+##   MANUAL=1 make test-one               # manual partitioning (formats Boot + System)
 ##   FILESYSTEM=ext4 make test-one        # root filesystem (btrfs | ext4)
 ##   VERIFY=0 make test-one               # skip the post-install inspection
 ##   SHARED_INSTALLER=1 make test-one     # drive the install with /shared/aelum-installer-cli
 test-one:
 	@MODE=auto \
 	 FILESYSTEM="$(FILESYSTEM)" LUKS="$(LUKS)" LVM="$(LVM)" MANUAL="$(MANUAL)" \
-	 REUSE_ESP="$(REUSE_ESP)" \
 	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
 	 LUKS_PASS="$(LUKS_PASS)" USER_PASS="$(USER_PASS)" \
 	 USERNAME="$(USERNAME)" SSH_PORT="$(SSH_PORT)" \

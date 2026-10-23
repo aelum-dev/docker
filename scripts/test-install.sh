@@ -14,16 +14,10 @@
 #               volume group (passes --lvm). Composes with LUKS and either
 #               filesystem (btrfs with subvolumes, or ext4).
 #
-#               MANUAL=1 use dualboot-safe manual partitioning: a 512 MiB ESP plus
-#               a System partition that fills the rest, driven via
-#               --manual-layout. Exercises the manual install path end to end.
-#
-#               REUSE_ESP=1 (implies MANUAL=1) pre-partitions the disk from the
-#               live ISO with a 100 MiB FAT ESP holding a marker file and stale
-#               memtest86+ binaries, then installs into the remaining free space
-#               reusing that ESP. The post-install check asserts the marker
-#               survived (the ESP was not formatted), memtest was backed up, and
-#               rEFInd was installed onto it.
+#               MANUAL=1 use manual partitioning: a 512 MiB ESP plus a System
+#               partition that fills the rest, driven via --manual-layout.
+#               Exercises the manual install path end to end (both selected
+#               partitions are formatted).
 #
 #               VERIFY=0 skip the post-install inspection of the installed system
 #               (verify-installed.sh runs it by default when VERIFY=1).
@@ -58,8 +52,7 @@ SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
 FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
 LVM="${LVM:-0}"                            # place root/home on LVM logical volumes: 0 | 1
-MANUAL="${MANUAL:-0}"                      # use manual (dualboot-safe) partitioning: 0 | 1
-REUSE_ESP="${REUSE_ESP:-0}"                # pre-create a small ESP and reuse it (implies MANUAL=1): 0 | 1
+MANUAL="${MANUAL:-0}"                      # use manual partitioning (formats Boot + System): 0 | 1
 VERIFY="${VERIFY:-1}"                      # independently inspect the installed system after install: 0 | 1
 QEMU_QVM="${QEMU_QVM:-1}"                  # 1 = use -enable-kvm -cpu host
 QEMU_EXTRA="${QEMU_EXTRA:-}"               # extra qemu-system-x86_64 args
@@ -110,10 +103,6 @@ command -v ssh              >/dev/null 2>&1 || fail "ssh not found"
 [ "$LUKS" = "0" ] || [ -n "$LUKS_PASS" ] || fail "LUKS_PASS must be set when LUKS=1"
 [ "$LVM" = "0" ] || [ "$LVM" = "1" ] || fail "LVM must be '0' or '1' (got '$LVM')"
 [ "$MANUAL" = "0" ] || [ "$MANUAL" = "1" ] || fail "MANUAL must be '0' or '1' (got '$MANUAL')"
-[ "$REUSE_ESP" = "0" ] || [ "$REUSE_ESP" = "1" ] || fail "REUSE_ESP must be '0' or '1' (got '$REUSE_ESP')"
-if [ "$REUSE_ESP" = "1" ] && [ "$MANUAL" != "1" ]; then
-    fail "REUSE_ESP=1 requires MANUAL=1 (it only makes sense on the manual path)"
-fi
 [ "$VERIFY" = "0" ] || [ "$VERIFY" = "1" ] || fail "VERIFY must be '0' or '1' (got '$VERIFY')"
 
 # --- Clean up stale state before we touch the vdisk --------------------------
@@ -162,52 +151,17 @@ wait_for_ssh() {
 
 # Emit a manual-layout JSON for a fresh disk: a 512 MiB ESP plus a System
 # partition that consumes the rest. Used by MANUAL=1 to exercise the manual
-# (dualboot-safe) install path headlessly. With REUSE_ESP=1 the ESP row instead
-# points at the pre-created partition, so the installer must reuse it in place.
-# The geometry is read from the guest so the sector math matches what the
-# installer sees.
+# install path headlessly. The geometry is read from the guest so the sector
+# math matches what the installer sees.
 build_manual_layout() {
-    ssh_root "DISK='$DISK_PATH' REUSE_ESP='$REUSE_ESP' bash -s" <<'EOS'
+    ssh_root "DISK='$DISK_PATH' bash -s" <<'EOS'
 set -e
 bytes=$(blockdev --getsize64 "$DISK")
 ss=$(blockdev --getss "$DISK")
 mib=$((1024 * 1024))
-if [ "$REUSE_ESP" = "1" ]; then
-    part="${DISK}1"
-    pbytes=$(blockdev --getsize64 "$part")
-    parts=$(printf '{"index":0,"path":"%s","sizeMB":%s,"sizeBytes":%s,"type":"esp","existingFstype":"vfat"},{"index":1,"path":"","sizeMB":0,"type":"system"}' \
-        "$part" "$((pbytes / mib))" "$pbytes")
-else
-    parts='{"index":0,"path":"","sizeMB":512,"type":"esp"},{"index":1,"path":"","sizeMB":0,"type":"system"}'
-fi
+parts='{"index":0,"path":"","sizeMB":512,"type":"esp"},{"index":1,"path":"","sizeMB":0,"type":"system"}'
 printf '{"disk":"%s","diskSizeMB":%s,"diskSizeBytes":%s,"sectorSizeBytes":%s,"partitions":[%s]}\n' \
     "$DISK" "$((bytes / mib))" "$bytes" "$ss" "$parts"
-EOS
-}
-
-# Create a Windows-style 100 MiB FAT ESP (with a marker file) and leave the rest
-# of the disk free, so the manual layout above can reuse the ESP as-is. Runs in
-# the live ISO, before the installer starts.
-prepare_reused_esp() {
-    ssh_root "DISK='$DISK_PATH' bash -s" <<'EOS'
-set -e
-part="${DISK}1"
-sgdisk --zap-all "$DISK" >/dev/null
-sgdisk -n 1:2048:+100M -t 1:ef00 -c 1:BOOT "$DISK" >/dev/null
-partprobe "$DISK" 2>/dev/null || true
-udevadm settle || true
-mkfs.vfat -F32 -n BOOT "$part" >/dev/null
-mkdir -p /mnt/reuse-esp
-# The type is given explicitly: the kernel's filesystem probe can miss a FAT
-# partition when the vfat module has not been loaded yet.
-mount -t vfat "$part" /mnt/reuse-esp
-printf 'aelum-dualboot-marker\n' > /mnt/reuse-esp/dualboot-marker.txt
-# Simulate another distro's memtest86+ package: pacman refuses to overwrite
-# these files unless the installer backs them up first.
-mkdir -p /mnt/reuse-esp/memtest86+
-printf 'stale memtest ia32\n' > /mnt/reuse-esp/memtest86+/memtest86ia32.efi
-printf 'stale memtest x64\n' > /mnt/reuse-esp/memtest86+/memtest86x64.efi
-umount /mnt/reuse-esp
 EOS
 }
 
@@ -319,10 +273,6 @@ fi
 if [ "$LVM" = "1" ]; then
     INSTALLER_ARGS+=(--lvm)
 fi
-if [ "$REUSE_ESP" = "1" ]; then
-    log "Pre-partitioning $DISK_PATH with a 100 MiB FAT ESP + marker (dualboot scenario) ..."
-    prepare_reused_esp || fail "could not prepare the reused ESP on $DISK_PATH"
-fi
 if [ "$MANUAL" = "1" ]; then
     MANUAL_LAYOUT="$(build_manual_layout)"
     [ -n "$MANUAL_LAYOUT" ] || fail "could not build a manual layout for $DISK_PATH"
@@ -359,8 +309,8 @@ log "installer CLI exited 0"
 # fstab, initramfs hooks, and boot entry match the requested combination.
 if [ "$VERIFY" = "1" ]; then
     log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
-    if { printf 'FILESYSTEM=%q LUKS=%q LVM=%q LUKS_PASS=%q DISK_PATH=%q REUSE_ESP=%q\n' \
-             "$FILESYSTEM" "$LUKS" "$LVM" "$LUKS_PASS" "$DISK_PATH" "$REUSE_ESP"
+    if { printf 'FILESYSTEM=%q LUKS=%q LVM=%q LUKS_PASS=%q DISK_PATH=%q\n' \
+             "$FILESYSTEM" "$LUKS" "$LVM" "$LUKS_PASS" "$DISK_PATH"
           cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
         log "Verification passed"

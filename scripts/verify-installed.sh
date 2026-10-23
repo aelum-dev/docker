@@ -11,7 +11,6 @@
 #   LVM         0 | 1          root+home are logical volumes in the `aelum` VG
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
-#   REUSE_ESP   0 | 1          the ESP was pre-created and reused (dualboot)
 #
 # The installed system is mounted read-only; every check is reported and the
 # script exits non-zero if any check fails.
@@ -23,7 +22,6 @@ LUKS="${LUKS:-0}"
 LVM="${LVM:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
-REUSE_ESP="${REUSE_ESP:-0}"
 
 MNT=/mnt
 ESP="${DISK_PATH}1"
@@ -172,7 +170,8 @@ check "rEFInd binary exists at EFI/refind/refind_x64.efi" test -f "$refind_dir/r
 conf="$refind_dir/refind.conf"
 check "rEFInd config exists at EFI/refind/refind.conf" test -f "$conf"
 # Each Aelum install owns a menu fragment under EFI/refind/aelum, keyed by a
-# short form of its root filesystem UUID, so two installs can share one ESP.
+# short form of its root filesystem UUID, so its kernel and menu entry stay
+# isolated from any other install.
 entry="$refind_dir/aelum/$install_id.conf"
 check "rEFInd config includes this install's menu entry (aelum/$install_id.conf)" \
     grep -Eq "^[[:space:]]*include[[:space:]]+aelum/$install_id\\.conf" "$conf"
@@ -247,18 +246,6 @@ fi
 # should have succeeded: the firmware needs an entry to launch rEFInd on boot.
 if command -v efibootmgr >/dev/null 2>&1; then
     check "firmware boot entry points at rEFInd" has "$(efibootmgr -v 2>/dev/null)" '\\EFI\\refind\\refind_x64\.efi'
-fi
-
-# ── Reused ESP (dualboot) ─────────────────────────────────────────────────────
-# REUSE_ESP=1 pre-creates the ESP with a marker and stale memtest86+ binaries
-# before the install. If the installer formatted the ESP (the bug this scenario
-# guards against), the marker is gone.
-if [ "$REUSE_ESP" = "1" ]; then
-    section "reused ESP (dualboot)"
-    check "pre-existing ESP marker survived (ESP was not formatted)" test -f "$MNT/efi/dualboot-marker.txt"
-    check "pre-existing ESP marker contents intact" grep -qx 'aelum-dualboot-marker' "$MNT/efi/dualboot-marker.txt"
-    check "pre-existing memtest was backed up" test -f "$MNT/efi/memtest86+/memtest86x64.efi.aelum-backup"
-    check "packaged memtest was installed" test -f "$MNT/efi/memtest86+/memtest86x64.efi"
 fi
 
 # ── Installed packages ────────────────────────────────────────────────────────

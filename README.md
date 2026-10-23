@@ -275,14 +275,14 @@ is used to log in.
 
 - Override with env vars: `MODE`, `USERNAME`, `USER_PASS`, `ROOT_PASS`,
   `SSH_PORT`, `DISK_PATH`, `FILESYSTEM`, `LUKS`, `LUKS_PASS`, `LVM`, `MANUAL`,
-  `REUSE_ESP`, `VERIFY`, `SHARED_INSTALLER`, `QEMU_QVM` (0 disables KVM),
+  `VERIFY`, `SHARED_INSTALLER`, `QEMU_QVM` (0 disables KVM),
   `QEMU_EXTRA`, `SHARED_DIR`.
 - Artifacts land in `logs/`: `test-progress.json` (installer stderr / JSON
   progress in auto mode), `qemu.log` (QEMU output), `matrix/` (per-cell logs).
 - Also exposed as make targets: `make test` (runs **every** install variation —
   the full matrix), `make test-one` (a single install, flag-driven), and
   `make test-boot` (boot). `make test-one` forwards `FILESYSTEM` / `LUKS` /
-  `LVM` / `MANUAL` / `REUSE_ESP` / `VERIFY` to the script, so
+  `LVM` / `MANUAL` / `VERIFY` to the script, so
   `make test-one LVM=1` and `LVM=1 make test-one` both work.
 
 ### Testing the installer CLI
@@ -303,11 +303,12 @@ make test-one
 USERNAME=aelum USER_PASS=aelum DISK_PATH=/dev/vda MODE=auto bash scripts/test-install.sh
 ```
 
-**Manual / dualboot mode** — boot the VM headless (this also mounts the host
+**Manual mode** — boot the VM headless (this also mounts the host
 `shared/` at `/shared`), then run the freshly built CLI with a `--manual-layout`
-JSON. The layout designates exactly one `esp` and one `system` partition; every
-other partition on the disk is left untouched, which is what makes it dualboot
-safe.
+JSON. The layout designates exactly one `esp` and one `system` partition. Both
+are formatted; every other partition on the disk is left untouched, so another
+OS and its data survive. Aelum always gets its own ESP — never point the `esp`
+row at another OS's boot partition.
 
 ```bash
 # 1) Boot headless with /shared mounted, leave the VM running
@@ -341,28 +342,12 @@ the remaining space):
 }
 ```
 
-To reuse an existing ESP (dualboot), point the `esp` row at the existing
-partition and set its exact size and filesystem. The installer mounts it as-is:
-it is **never formatted**, and its size has no floor. Only a brand-new ESP needs
-the 512 MiB minimum.
-
-```json
-{
-  "disk": "/dev/vda",
-  "diskSizeMB": 20480,
-  "diskSizeBytes": 21474836480,
-  "sectorSizeBytes": 512,
-  "partitions": [
-    {"index": 0, "path": "/dev/vda1", "sizeMB": 100, "sizeBytes": 104857600, "existingFstype": "vfat", "type": "esp"},
-    {"index": 1, "path": "", "sizeMB": 0, "type": "system"}
-  ]
-}
-```
-
-A reused ESP must be FAT (`vfat`, or the `fat32` alias); anything else is
-rejected during validation. Other existing partitions on the disk (Windows,
-another distro) are represented by rows with an empty `type` and are never
-formatted, mounted, or added to the fstab.
+An existing partition can also be designated as `esp` or `system` by setting
+`path` and its exact `sizeBytes`; it is **formatted in place**. The Boot
+partition must be at least 512 MiB and is always formatted as FAT32, so choose a
+dedicated partition rather than another OS's ESP. Other existing partitions on
+the disk (Windows, another distro) are represented by rows with an empty `type`
+and are never formatted, mounted, or added to the fstab.
 
 Validate the layout before committing to a real install by running the same
 command with `--dry-run` appended.
@@ -370,15 +355,8 @@ command with `--dry-run` appended.
 `MANUAL=1` automates the manual path end to end: it builds a fresh-disk layout
 (a 512 MiB ESP plus a System partition filling the rest) from the guest's
 geometry and drives `--manual-layout` itself, so no hand-written JSON is needed.
-Add `REUSE_ESP=1` to pre-create a 100 MiB FAT ESP containing a marker file and
-stale `memtest86+` binaries, then install into the remaining free space reusing
-it. The post-install check asserts the marker survived (the ESP was not
-formatted), the stale memtest files were backed up, and rEFInd was installed
-onto it — the full dualboot regression test:
-
-```bash
-MANUAL=1 REUSE_ESP=1 make test-one
-```
+Both selected partitions are formatted, and the post-install check verifies the
+resulting layout.
 
 ### LVM and the full install matrix
 
@@ -390,8 +368,7 @@ these from the environment and passes the matching flags to the CLI:
 | `FILESYSTEM` | `btrfs` (default) \| `ext4` | root filesystem (on the LVs when `LVM=1`) |
 | `LUKS` | `0` (default) \| `1` | LUKS2-encrypt the root partition |
 | `LVM` | `0` (default) \| `1` | place root+home on logical volumes in the `aelum` VG |
-| `MANUAL` | `0` (default) \| `1` | dualboot-safe manual partitioning (512 MiB ESP + System) |
-| `REUSE_ESP` | `0` (default) \| `1` | with `MANUAL=1`: pre-create a 100 MiB FAT ESP and reuse it (dualboot regression) |
+| `MANUAL` | `0` (default) \| `1` | manual partitioning (formats the selected 512 MiB ESP + System) |
 | `VERIFY` | `1` (default) \| `0` | inspect the installed system after the install |
 
 ```bash
@@ -399,7 +376,7 @@ LVM=1 make test-one                       # auto + btrfs + LVM
 LVM=1 FILESYSTEM=ext4 make test-one       # auto + ext4 + LVM
 LUKS=1 LVM=1 make test-one                # auto + LUKS + LVM
 MANUAL=1 LVM=1 make test-one              # manual + LVM
-MANUAL=1 REUSE_ESP=1 make test-one        # manual, reuse a pre-made 100 MiB ESP
+MANUAL=1 make test-one                    # manual partitioning (fresh ESP + System)
 ```
 
 After a successful install, `scripts/verify-installed.sh` runs **inside the
