@@ -9,6 +9,7 @@
 #   FILESYSTEM  ext4 | btrfs   filesystem on the root partition
 #   LUKS        0 | 1          root partition is LUKS2-encrypted
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
+#   LVM         0 | 1          root (and ext4 home) live on LVM logical volumes
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
 #
 # The installed system is mounted read-only; every check is reported and the
@@ -19,6 +20,7 @@ set -u
 FILESYSTEM="${FILESYSTEM:-btrfs}"
 LUKS="${LUKS:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
+LVM="${LVM:-0}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
 
 MNT=/mnt
@@ -42,12 +44,17 @@ fstab_not() { ! grep -Eq "[[:space:]]$1[[:space:]]" "$MNT/etc/fstab"; }
 
 cleanup() {
     umount -R "$MNT" 2>/dev/null
+    # Deactivate the group before closing the mapper: an active LV holds the
+    # encrypted device open.
+    if [ "$LVM" = 1 ] && [ -n "${VG_NAME:-}" ]; then
+        vgchange -an "$VG_NAME" 2>/dev/null
+    fi
     [ "$LUKS" = 1 ] && cryptsetup close "$LUKS_MAPPER" 2>/dev/null
     return 0
 }
 trap cleanup EXIT
 
-echo "Verifying install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS)"
+echo "Verifying install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM)"
 
 # ── Open LUKS ─────────────────────────────────────────────────────────────────
 rootdev="$ROOT_PART"
@@ -60,6 +67,20 @@ if [ "$LUKS" = 1 ]; then
     fi
     udevadm settle 2>/dev/null || true
     rootdev="/dev/mapper/$LUKS_MAPPER"
+fi
+
+# ── Activate LVM ──────────────────────────────────────────────────────────────
+# The volume group name is derived from the PV (never hard-coded), and the root
+# device becomes the root LV. This mirrors what the initramfs does at boot.
+if [ "$LVM" = 1 ]; then
+    vgchange -ay 2>/dev/null
+    VG_NAME="$(pvs --noheadings -o vg_name "$rootdev" 2>/dev/null | tr -d ' ')"
+    if [ -z "$VG_NAME" ]; then
+        echo "FATAL: $rootdev is not an LVM physical volume"
+        exit 1
+    fi
+    rootdev="/dev/$VG_NAME/root"
+    home_lv="/dev/$VG_NAME/home"
 fi
 
 # ── Mount the installed system read-only ──────────────────────────────────────
@@ -98,8 +119,24 @@ check "fstab bind-mounts this install's boot dir at /boot" \
 check "fstab references the root filesystem UUID" fstab_has "$root_uuid"
 if [ "$FILESYSTEM" = btrfs ]; then
     check "fstab mounts /home as the @home subvolume" fstab_has "^UUID=$root_uuid[[:space:]]+/home[[:space:]]+btrfs.*subvol=@home"
+elif [ "$LVM" = 1 ]; then
+    # ext4 + LVM keeps /home on its own logical volume.
+    home_uuid="$(blkid -o value -s UUID "$home_lv")"
+    check "fstab mounts the home LV at /home" fstab_has "^UUID=$home_uuid[[:space:]]+/home[[:space:]]+ext4"
 else
     check "fstab has no /home entry (ext4)" fstab_not /home
+fi
+
+# ── LVM ───────────────────────────────────────────────────────────────────────
+if [ "$LVM" = 1 ]; then
+    section "lvm"
+    echo "  VG: $VG_NAME"
+    check "volume group exists" vgs "$VG_NAME"
+    check "root logical volume exists" lvs "$VG_NAME/root"
+    if [ "$FILESYSTEM" = ext4 ]; then
+        check "home logical volume exists (ext4)" lvs "$VG_NAME/home"
+    fi
+    check "fstab references the root LV filesystem UUID" fstab_has "$root_uuid"
 fi
 
 # ── initramfs hooks ───────────────────────────────────────────────────────────
@@ -108,6 +145,14 @@ hooks="$(grep -E '^HOOKS=' "$MNT/etc/mkinitcpio.conf" 2>/dev/null)"
 echo "  HOOKS: $hooks"
 if [ "$LUKS" = 1 ]; then
     check "HOOKS include an encrypt hook" has "$hooks" '(^|[^[:alnum:]_])(sd-encrypt|encrypt)([^[:alnum:]_]|$)'
+fi
+if [ "$LVM" = 1 ]; then
+    check "HOOKS include the lvm2 hook" has "$hooks" '(^|[^[:alnum:]_])lvm2([^[:alnum:]_]|$)'
+    if [ "$LUKS" = 1 ]; then
+        # LUKS sits below LVM: sd-encrypt must run before lvm2.
+        check "HOOKS order is sd-encrypt then lvm2" \
+            bash -c '[[ "$1" =~ sd-encrypt.*lvm2 ]]' _ "$hooks"
+    fi
 fi
 
 # ── Bootloader (rEFInd) ───────────────────────────────────────────────────────
@@ -180,6 +225,13 @@ if [ "$LUKS" = 1 ]; then
 else
     check "entry has no rd.luks.name= (no LUKS)" hasnt "$opts" 'rd\.luks\.name='
 fi
+if [ "$LVM" = 1 ]; then
+    # The root is selected by filesystem UUID; a device-mapper path would break
+    # if the volume group were ever renamed.
+    check "entry has no LVM device-mapper path" hasnt "$opts" '/dev/mapper/'
+    entry_root="$(printf '%s' "$opts" | sed -nE 's/.*root=UUID=([^ "]+).*/\1/p')"
+    check "entry root UUID is the root LV filesystem UUID" [ "$entry_root" = "$root_uuid" ]
+fi
 if [ "$FILESYSTEM" = btrfs ]; then
     check "entry has rootflags=subvol=@ (btrfs)" has "$opts" 'rootflags=subvol=@'
 else
@@ -197,7 +249,7 @@ check "system is populated (/etc/os-release present)" [ -s "$MNT/etc/os-release"
 
 echo
 if [ "$fails" -eq 0 ]; then
-    echo "VERIFY: PASS (fs=$FILESYSTEM luks=$LUKS)"
+    echo "VERIFY: PASS (fs=$FILESYSTEM luks=$LUKS lvm=$LVM)"
     exit 0
 fi
 echo "VERIFY: FAIL ($fails check(s) failed)"
