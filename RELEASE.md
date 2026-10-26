@@ -38,7 +38,7 @@ bucket with `public-read`. `cdn.aelum.dev` is CNAME'd to the bucket endpoint
 ```
 https://cdn.aelum.dev/<tag>/<filename>
 https://cdn.aelum.dev/<tag>/<filename>.sha256|.sha512|.asc
-https://cdn.aelum.dev/aelum/latest.json        ← release manifest
+https://cdn.aelum.dev/latest.json              ← release manifest (bucket root)
 https://aelum.dev/.well-known/openpgpkey/      ← public signing key (WKD)
 ```
 
