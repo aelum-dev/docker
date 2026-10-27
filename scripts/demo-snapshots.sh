@@ -86,7 +86,10 @@ take_pair() {
 
 if [ "$RESET" = 1 ]; then
     echo "=== deleting existing snapshots ==="
-    for n in $(snap list 2>/dev/null | sed -n 's/^\([0-9]\{1,\}\) .*/\1/p' | sort -rn); do
+    # snapper pads a one-digit number with a space, so the number is matched
+    # after any leading blanks. Highest first: a post snapshot may not outlive
+    # the pre it is paired with.
+    for n in $(snap list 2>/dev/null | sed -n 's/^ *\([0-9]\{1,\}\) .*/\1/p' | sort -rn); do
         [ "$n" = 0 ] && continue
         snap delete "$n" >/dev/null 2>&1 || echo "  could not delete $n"
     done

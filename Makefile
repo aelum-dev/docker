@@ -277,7 +277,7 @@ DEMO_FLAGS := $(if $(filter 1,$(RESET)),--reset,)
 ##   make test-boot && make demo-snapshots && make run-disk
 ##   make demo-snapshots RESET=1     delete the existing snapshots first
 demo-snapshots:
-	@if ! pgrep -f "qemu-system-x86_64.*vdisk.qcow2" >/dev/null 2>&1; then \
+	@if ! pgrep -f "qemu-system-x86_64.*[v]disk.qcow2" >/dev/null 2>&1; then \
 		echo "Start the test VM first:  make -C docker test-boot"; exit 1; \
 	fi
 	@cp scripts/demo-snapshots.sh ../shared/demo-snapshots.sh
