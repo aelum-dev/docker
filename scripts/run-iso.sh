@@ -60,6 +60,18 @@ fi
 XRES="${XRES:-1920}"
 YRES="${YRES:-1080}"
 
+# --- Headless capture mode -----------------------------------------------
+# HEADLESS=1 draws nothing on the host and gives the guest a plain VGA, which is
+# the only thing QEMU's `screendump` can read: that is how the boot menu gets
+# screenshotted (scripts/menu-shots.sh). MONITOR=<path> puts QEMU's human
+# monitor on a unix socket so keys and screendumps can be sent from the host,
+# SERIAL=<path> keeps the guest's text console in a file, and SSH_PORT=0 drops
+# the port forward so a headless capture can run next to a test VM.
+HEADLESS="${HEADLESS:-0}"
+MONITOR="${MONITOR:-}"
+SERIAL="${SERIAL:-}"
+SSH_PORT="${SSH_PORT:-2222}"
+
 # --- Run QEMU ---
 QEMU_ARGS=(
     -enable-kvm
@@ -67,19 +79,44 @@ QEMU_ARGS=(
     -smp 4,sockets=1,cores=4,threads=1
     -m 4G
     -machine q35
-    -display sdl,gl=on
-    -device virtio-vga-gl,xres=$XRES,yres=$YRES,edid=on
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"
     -drive if=pflash,format=raw,file="$OVMF_VARS"
     -drive id=vdisk,file="$VDISK",if=none,format=qcow2,cache=writeback,aio=io_uring
     -device virtio-blk-pci,drive=vdisk
     -virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared
-    -netdev user,id=net0,hostfwd=tcp::2222-:22
-    -device virtio-net-pci,netdev=net0
-    -device virtio-serial-pci
-    -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
-    -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on
 )
+
+if [ "$HEADLESS" = 1 ]; then
+    # std-vga, not virtio-vga-gl: screendump reads the standard VGA console, and
+    # -nodefaults keeps QEMU from adding a monitor or a default serial device
+    # that would clash with the ones asked for above.
+    QEMU_ARGS+=(-display none -nodefaults -vga std)
+else
+    QEMU_ARGS+=(
+        -display sdl,gl=on
+        -device virtio-vga-gl,xres=$XRES,yres=$YRES,edid=on
+        -device virtio-serial-pci
+        -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
+        -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on
+    )
+fi
+
+if [ -n "$MONITOR" ]; then
+    mkdir -p "$(dirname "$MONITOR")" 2>/dev/null
+    rm -f "$MONITOR" 2>/dev/null
+    QEMU_ARGS+=(-monitor "unix:$MONITOR,server,nowait")
+fi
+if [ -n "$SERIAL" ]; then
+    mkdir -p "$(dirname "$SERIAL")" 2>/dev/null
+    QEMU_ARGS+=(-serial "file:$SERIAL")
+fi
+
+if [ "$SSH_PORT" = 0 ] || [ -z "$SSH_PORT" ]; then
+    QEMU_ARGS+=(-netdev user,id=net0)
+else
+    QEMU_ARGS+=(-netdev user,id=net0,hostfwd=tcp::${SSH_PORT}-:22)
+fi
+QEMU_ARGS+=(-device virtio-net-pci,netdev=net0)
 
 if [ -n "$ISO" ]; then
     QEMU_ARGS=(-cdrom "$ISO" -boot d "${QEMU_ARGS[@]}")

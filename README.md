@@ -428,6 +428,53 @@ The dimensions are `MODES` (`auto manual`), `FILESYSTEMS` (`btrfs ext4`),
 full desktop install is heavy, so the whole matrix takes a long time — narrow the
 lists while iterating.
 
+### Looking at the snapshot boot menu
+
+A btrfs install keeps snapper snapshots and offers them in rEFInd as one entry
+with the snapshots inside it. Three scripts cover that, from cheapest to real:
+
+```bash
+./scripts/fake-snapshot-menu.sh        # the menu generator against a fixture: no disk, no root
+./scripts/menu-shots.sh                # screenshots of the real menu, no QEMU window
+make demo-snapshots RESET=1            # five demo snapshots on the test disk
+```
+
+**`fake-snapshot-menu.sh`** builds a fake ESP, a fake snapper store and a stub
+`findmnt`, runs the generator the installer would install
+(`extract-snapshot-generator.sh` pulls it out of the installer's Go source), and
+asserts what the fragment must look like: one `menuentry`, every snapshot as a
+`submenuentry`, the newest *pre* snapshot as the one the entry boots, a pacman
+pair labelled by what it is, a person's description shown verbatim, dates kept,
+nothing outside rEFInd's ASCII font, the same output twice, no entry at all when
+there are no snapshots, and a failure when the ESP is not mounted. It is a host
+check: it says out loud that it does not touch the real mount table.
+
+**`menu-shots.sh`** boots what is on `vdisk.qcow2` headless (`HEADLESS=1
+MONITOR=… run-iso.sh`), waits for rEFInd to take over the screen, screenshots
+the main menu, moves to the snapshot entry, opens its submenu, and powers the VM
+off. Frames land in `logs/menu/` as `.ppm` and `.png`. `--entry 0` shows the
+menu exactly as rEFInd opens it, `--boot-snapshot` boots the first snapshot in
+the submenu, `--then-boot` boots the install itself, `KEEP_UP=1` leaves the VM up
+so keys can be sent by hand with `qemu-mon.py`:
+
+```bash
+KEEP_UP=1 ./scripts/menu-shots.sh
+./scripts/qemu-mon.py "sendkey right" "screendump /tmp/x.ppm"
+```
+
+Two things about a real menu, both learned the hard way:
+
+- The menu file is written by the **installed system** (its service runs at every
+  boot, and snapper's plugin after every snapshot). `make demo-snapshots` runs
+  from the live ISO, which cannot write it, so after a demo run the menu on the
+  ESP is one boot behind: run `menu-shots.sh --then-boot` once, and the
+  screenshots after that are current.
+- `test-install.sh` recreates `OVMF_VARS.fd` on every run, so after a
+  `test-boot` the firmware has no `Aelum` entry. `make demo-snapshots` deletes
+  stale entries and creates a fresh one; a stale entry pointing at a disk that
+  has since been recreated fails with `BdsDxe: … Not Found`, and the menu never
+  appears at all.
+
 ## Layout
 
 ```
@@ -438,10 +485,16 @@ lists while iterating.
 ├── scripts/
 │   ├── build-iso.sh           # Full build pipeline (run inside the container)
 │   ├── stage-local-repos.sh   # stage local installer/ + live-iso/ for local-build
-│   ├── run-iso.sh             # QEMU launch script
+│   ├── run-iso.sh             # QEMU launch script (ISO or installed disk; HEADLESS/MONITOR for capture)
 │   ├── test-install.sh        # headless QEMU + installer-cli test
 │   ├── test-all.sh            # run the full install matrix, print a summary
 │   ├── verify-installed.sh    # independent post-install inspection (in the guest)
+│   ├── demo-snapshots.sh      # five demo snapshots on the test disk, for the boot menu
+│   ├── menu-shots.sh          # boot the installed disk headless and screenshot its rEFInd menu
+│   ├── menu-shots.py          # the key presses and screendumps behind menu-shots.sh
+│   ├── qemu-mon.py            # send QEMU monitor commands over its unix socket
+│   ├── extract-snapshot-generator.sh  # write out the boot-menu generator from the installer source
+│   ├── fake-snapshot-menu.sh  # run that generator against a fixture (no disk, no root)
 │   ├── release.sh             # entry point: load secrets, sign, upload, update site
 │   ├── sign-iso.sh            # sign + checksum the ISO (GPG) for release
 │   ├── gen-release-metadata.sh    # build latest.json + website release.ts
