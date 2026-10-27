@@ -41,6 +41,10 @@ hasnt() { ! grep -qE "$2" <<<"$1"; }
 # fstab_has "<ERE>" / fstab_not "<mount point>"
 fstab_has() { grep -Eq "$1" "$MNT/etc/fstab"; }
 fstab_not() { ! grep -Eq "[[:space:]]$1[[:space:]]" "$MNT/etc/fstab"; }
+# pkg_installed "<name>" — query the installed system's own package database.
+pkg_installed() { pacman -Q --dbpath "$MNT/var/lib/pacman" "$1" >/dev/null 2>&1; }
+# not <command...> — invert a command's exit status, for "must not be there" checks.
+not() { if "$@" >/dev/null 2>&1; then return 1; else return 0; fi; }
 
 cleanup() {
     umount -R "$MNT" 2>/dev/null
@@ -246,6 +250,79 @@ fi
 # ── Installed packages ────────────────────────────────────────────────────────
 section "installed system"
 check "system is populated (/etc/os-release present)" [ -s "$MNT/etc/os-release" ]
+
+# ── Snapshots (snapper) ───────────────────────────────────────────────────────
+# The installer configures snapper for the btrfs layout only: separate
+# subvolumes are what make a snapshot of @ cheap, and an ext4 install has no
+# subvolume to snapshot, so it gets neither snapper nor btrfs-assistant.
+if [ "$FILESYSTEM" = btrfs ]; then
+    section "snapshots (snapper)"
+
+    check "snapper is installed" pkg_installed snapper
+    check "btrfs-assistant is installed" pkg_installed btrfs-assistant
+
+    config_dir="$MNT/etc/snapper/configs"
+    names="$(ls -1 "$config_dir" 2>/dev/null)"
+    echo "  configs: $(printf '%s' "$names" | tr '\n' ' ')"
+    check "exactly two snapper configs" [ "$(grep -c . <<<"$names")" -eq 2 ]
+
+    for cfg in root home; do
+        case "$cfg" in
+            root) subvol="@";   subvol_re='^SUBVOLUME="/"$'   ;;
+            home) subvol="@home"; subvol_re='^SUBVOLUME="/home"$' ;;
+        esac
+        content="$(cat "$config_dir/$cfg" 2>/dev/null)"
+        check "config $cfg snapshots $subvol" has "$content" "$subvol_re"
+        check "config $cfg is a btrfs config" has "$content" '^FSTYPE="btrfs"$'
+        check "config $cfg takes timeline snapshots" has "$content" '^TIMELINE_CREATE="yes"$'
+        check "config $cfg keeps timeline history" has "$content" '^TIMELINE_CLEANUP="yes"$'
+        check "config $cfg cleans pre/post pairs by count" has "$content" '^NUMBER_CLEANUP="yes"$'
+    done
+
+    check "SNAPPER_CONFIGS lists both configs" \
+        grep -Eq '^SNAPPER_CONFIGS="root home"' "$MNT/etc/conf.d/snapper"
+
+    # Snapper refuses to work with a .snapshots that is not a subvolume, and a
+    # plain directory would be copied into every snapshot of its parent.
+    # Match on the parent subvolume id, not on the spelling of the path: btrfs
+    # prints a nested subvolume relative to the mounted one (.snapshots) and one
+    # it cannot see from this namespace top-level-relative (@home/.snapshots).
+    subvols="$(btrfs subvolume list "$MNT" 2>/dev/null)"
+    subvol_id() {
+        sed -nE "s/^ID ([0-9]+) gen [0-9]+ top level [0-9]+ path $1$/\1/p" <<<"$subvols" | head -1
+    }
+    owns_snapshots() {
+        local id
+        id="$(subvol_id "$1")"
+        [ -n "$id" ] && grep -qE "^ID [0-9]+ gen [0-9]+ top level $id path [^ ]*\.snapshots$" <<<"$subvols"
+    }
+    check "@ has its own .snapshots subvolume" owns_snapshots '@'
+    check "@home has its own .snapshots subvolume" owns_snapshots '@home'
+    check "only the snapshotted subvolumes have a .snapshots" \
+        [ "$(grep -cE 'path [^ ]*\.snapshots$' <<<"$subvols")" -eq 2 ]
+
+    echo "  quotas:"; btrfs quota status "$MNT" 2>/dev/null | sed 's/^/    /'
+    check "btrfs quotas are enabled (snapper space limits)" \
+        btrfs quota status --is-enabled "$MNT"
+
+    for unit in snapperd snapper-timeline.timer snapper-cleanup.timer; do
+        check "$unit is enabled" systemctl --root="$MNT" is-enabled "$unit"
+    done
+
+    # The file checks above say what was written; these say it works. Snapper
+    # lists only the configs named in SNAPPER_CONFIGS, and with --root it reads
+    # and opens the installed system's own configs and subvolumes from here.
+    list_configs="$(snapper --no-dbus --root="$MNT" list-configs 2>&1)"
+    check "snapper loads both configs of the installed system" \
+        bash -c '[[ "$1" == *"root"* && "$1" == *"/home"* ]]' _ "$list_configs"
+    check "snapper reads the root config's snapshot store" \
+        snapper --no-dbus --root="$MNT" -c root list
+else
+    section "snapshots (snapper)"
+    check "snapper is not installed (ext4)" not pkg_installed snapper
+    check "btrfs-assistant is not installed (ext4)" not pkg_installed btrfs-assistant
+    check "no snapper configs (ext4)" [ ! -d "$MNT/etc/snapper/configs" ]
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then
