@@ -1,6 +1,6 @@
 .PHONY: help build local-build build-local local-clean image update dev local-dev attach stop clean \
         release release-sign release-upload release-website wkd \
-        run run-clean vm-clean test test-one test-boot test-matrix
+        run run-clean run-disk vm-clean test test-one test-boot test-matrix demo-snapshots
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -41,6 +41,7 @@ help:
 	@echo ""
 	@echo "QEMU (host, needs KVM + sshpass):"
 	@echo "  make run          Boot the latest ISO (XRES= YRES= override resolution)"
+	@echo "  make run-disk     Boot what is installed on vdisk.qcow2 (no ISO; shows its rEFInd)"
 	@echo "  make run-clean    Delete OVMF_VARS.fd then boot (fix corrupt NVRAM)"
 	@echo "  make vm-clean       Delete vdisk.qcow2 + OVMF_VARS.fd (fresh test disk)"
 	@echo ""
@@ -52,6 +53,7 @@ help:
 	@echo "  make test-one LVM=1   single LVM install"
 	@echo "  make test-one MANUAL=1  single manual install (formats Boot + System)"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
+	@echo "  make demo-snapshots   Put 5 demo snapshots on the test disk (needs test-boot running)"
 
 # ===========================================================================
 # Docker — ISO build pipeline (privileged container, writes ISO to output/)
@@ -257,3 +259,28 @@ test-matrix:
 	@MODES="$(MODES)" FILESYSTEMS="$(FILESYSTEMS)" LUKSES="$(LUKSES)" LVMS="$(LVMS)" \
 	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
 	 ./scripts/test-all.sh
+
+## run-disk: boot the system installed on the test disk, through its own rEFInd
+##       (no ISO, no -boot d: OVMF follows its own boot order)
+run-disk:
+	@BOOT_DISK=1 ./scripts/run-iso.sh
+
+# demo-snapshots: five snapshots on the test disk, so the rEFInd snapshot menu
+# has something to show. The live ISO has to be running (test-boot); the script
+# itself is copied into shared/, which the guest mounts at /shared.
+SSH_PORT ?= 2222
+DEMO_FLAGS := $(if $(filter 1,$(RESET)),--reset,)
+
+## demo-snapshots: create 5 demo snapshots in the installed system on the test disk,
+##       make sure its firmware entry exists, then power the VM off so
+##       `make run-disk` can boot into that menu.
+##   make test-boot && make demo-snapshots && make run-disk
+##   make demo-snapshots RESET=1     delete the existing snapshots first
+demo-snapshots:
+	@if ! pgrep -f "qemu-system-x86_64.*vdisk.qcow2" >/dev/null 2>&1; then \
+		echo "Start the test VM first:  make -C docker test-boot"; exit 1; \
+	fi
+	@cp scripts/demo-snapshots.sh ../shared/demo-snapshots.sh
+	@ssh -p $(SSH_PORT) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost \
+		'mount -o rw,subvol=@ /dev/vda2 /mnt || { echo "could not mount the installed root (LUKS or LVM install? mount it yourself, then run /shared/demo-snapshots.sh --root /mnt)"; exit 1; }; /shared/demo-snapshots.sh --root /mnt $(DEMO_FLAGS); sync; umount -R /mnt; efibootmgr 2>/dev/null | sed -n "s/^Boot\([0-9]*\)\* Aelum.*/\1/p" | xargs -r -n1 -I{} sh -c "efibootmgr -b {} -D >/dev/null"; efibootmgr -c -d /dev/vda -p 1 -L Aelum -l "\\EFI\\refind\\refind_x64.efi" >/dev/null; poweroff'
+	@echo "Next:  make -C docker run-disk   (then select the snapshot icon and press F2)"

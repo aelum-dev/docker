@@ -352,7 +352,11 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "generator writes this install's snapshot menu fragment" \
         grep -qF 'EFI/refind/aelum/$install_id-snapshots.conf' "$generator"
     check "generator copies the boot options from the install's own entry" \
-        grep -qF 'rootflags=subvol=$snapshot_subvol' "$generator"
+        grep -qF 'rootflags=subvol=$subvol_base/$1/snapshot' "$generator"
+    check "generator lists the snapshots inside one menu entry" \
+        grep -qF 'submenuentry' "$generator"
+    check "generator boots the snapshot taken before a change" \
+        grep -qF '[ "$type" = pre ]' "$generator"
     check "snapper plugin exists and is executable" [ -x "$plugin" ]
     check "snapper plugin reacts to snapshot create and delete" \
         grep -qF 'create-snapshot-post|delete-snapshot-post' "$plugin"
@@ -369,6 +373,20 @@ if [ "$FILESYSTEM" = btrfs ]; then
         grep -Eq "^[[:space:]]*include[[:space:]]+aelum/$install_id-snapshots\.conf" "$conf"
     check "the live system is still the default selection" \
         grep -Eq '^[[:space:]]*default_selection[[:space:]]+"' "$conf"
+
+    # An entry and its snapshots have to be listed together, in that order: a
+    # plain filename sort would put "-snapshots.conf" before ".conf".
+    entry_line=$(grep -En "^[[:space:]]*include[[:space:]]+aelum/$install_id\.conf" \
+        "$conf" | head -n1 | cut -d: -f1)
+    snapshot_line=$(grep -En "^[[:space:]]*include[[:space:]]+aelum/$install_id-snapshots\.conf" \
+        "$conf" | head -n1 | cut -d: -f1)
+    check "the snapshot menu is listed after the system it belongs to" \
+        bash -c '[[ -n "$1" && -n "$2" && "$1" -lt "$2" ]]' _ "$entry_line" "$snapshot_line"
+
+    # The generated entry points at the theme's history glyph. If the theme does
+    # not ship it, the menu shows a fallback icon and snapshots look like systems.
+    check "the theme ships the snapshot icon the menu uses" \
+        [ -f "$refind_dir/themes/aelum/icons/os_snapshot.png" ]
 else
     section "snapshots (snapper)"
     check "snapper is not installed (ext4)" not pkg_installed snapper

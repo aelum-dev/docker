@@ -400,7 +400,9 @@ installed root read-only, and asserts
   transaction snapshot hooks exist and are ordered around the transaction; and the
   pieces that make snapshots bootable are in place — `/usr/local/bin/aelum-refind-snapshots`,
   its enabled service, the snapper plugin, and the `aelum/<id>-snapshots.conf`
-  fragment `refind.conf` includes. An ext4 install is checked to have **none** of it.
+  fragment `refind.conf` includes **after** the install's own entry (a filename
+  sort would list the snapshots first), pointing at an icon the theme really
+  ships. An ext4 install is checked to have **none** of it.
 
 `verify-installed.sh` never calls the installer, so it validates the on-disk
 result rather than the code that produced it. Set `VERIFY=0` to skip it.
