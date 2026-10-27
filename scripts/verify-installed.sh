@@ -317,11 +317,71 @@ if [ "$FILESYSTEM" = btrfs ]; then
         bash -c '[[ "$1" == *"root"* && "$1" == *"/home"* ]]' _ "$list_configs"
     check "snapper reads the root config's snapshot store" \
         snapper --no-dbus --root="$MNT" -c root list
+
+    # ── Snapshots around pacman transactions ───────────────────────────────
+    # A pre/post pair is the undo path for an update, so both halves must exist,
+    # be ordered around the transaction, and be skipped when snapper is not there.
+    pre_hook="$MNT/etc/pacman.d/hooks/90-aelum-snapper-pre.hook"
+    post_hook="$MNT/etc/pacman.d/hooks/91-aelum-snapper-post.hook"
+    for hook in "$pre_hook" "$post_hook"; do
+        check "pacman hook $(basename "$hook") exists" [ -f "$hook" ]
+        check "$(basename "$hook") is skipped when snapper is not installed" \
+            grep -Eq '^Depends = snapper$' "$hook"
+        check "$(basename "$hook") triggers on package transactions" \
+            grep -Eq '^Target = \*$' "$hook"
+        # pacman allows exactly one Type per hook: two declarations make it warn
+        # and the last one silently wins.
+        check "$(basename "$hook") declares exactly one Type" \
+            [ "$(grep -c '^Type = ' "$hook")" = "1" ]
+        check "$(basename "$hook") triggers on Type = Package" \
+            grep -Eq '^Type = Package$' "$hook"
+    done
+    check "the pre hook snapshots @ before the transaction" \
+        grep -Eq '^Exec = .* -c root create -t pre' "$pre_hook"
+    check "the post hook pairs with the pre snapshot by number" \
+        grep -Eq '^Exec = .*--pre-number' "$post_hook"
+
+    # ── Snapshots in the boot menu ─────────────────────────────────────────
+    # rEFInd shows exactly the stanzas its config contains, so the installed system
+    # has to own a generator, a trigger, and a fragment to write. The fragment is
+    # empty here (no snapshot has been taken yet); what matters is that the include
+    # is in place and the pieces that fill it are executable.
+    generator="$MNT/usr/local/bin/aelum-refind-snapshots"
+    plugin="$MNT/usr/lib/snapper/plugins/10-aelum-refind-snapshots"
+    check "snapshot menu generator exists and is executable" [ -x "$generator" ]
+    check "generator writes this install's snapshot menu fragment" \
+        grep -qF 'EFI/refind/aelum/$install_id-snapshots.conf' "$generator"
+    check "generator copies the boot options from the install's own entry" \
+        grep -qF 'rootflags=subvol=$snapshot_subvol' "$generator"
+    check "snapper plugin exists and is executable" [ -x "$plugin" ]
+    check "snapper plugin reacts to snapshot create and delete" \
+        grep -qF 'create-snapshot-post|delete-snapshot-post' "$plugin"
+    check "snapper plugin only follows the root config" grep -qF '[ "$2" = "/" ]' "$plugin"
+    check "aelum-refind-snapshots.service is enabled" \
+        systemctl --root="$MNT" is-enabled aelum-refind-snapshots.service
+    check "snapshot menu unit runs the generator" \
+        grep -qF 'ExecStart=/usr/local/bin/aelum-refind-snapshots' \
+            "$MNT/etc/systemd/system/aelum-refind-snapshots.service"
+
+    snapshot_entry="$refind_dir/aelum/$install_id-snapshots.conf"
+    check "rEFInd snapshot menu fragment exists" [ -f "$snapshot_entry" ]
+    check "rEFInd config includes the snapshot menu fragment" \
+        grep -Eq "^[[:space:]]*include[[:space:]]+aelum/$install_id-snapshots\.conf" "$conf"
+    check "the live system is still the default selection" \
+        grep -Eq '^[[:space:]]*default_selection[[:space:]]+"' "$conf"
 else
     section "snapshots (snapper)"
     check "snapper is not installed (ext4)" not pkg_installed snapper
     check "btrfs-assistant is not installed (ext4)" not pkg_installed btrfs-assistant
     check "no snapper configs (ext4)" [ ! -d "$MNT/etc/snapper/configs" ]
+    check "no pacman snapshot hooks (ext4)" \
+        bash -c '[[ ! -e "$1" && ! -e "$2" ]]' _ \
+            "$MNT/etc/pacman.d/hooks/90-aelum-snapper-pre.hook" \
+            "$MNT/etc/pacman.d/hooks/91-aelum-snapper-post.hook"
+    check "no snapshot menu generator (ext4)" \
+        [ ! -e "$MNT/usr/local/bin/aelum-refind-snapshots" ]
+    check "no snapshot menu fragment (ext4)" \
+        [ ! -e "$refind_dir/aelum/$install_id-snapshots.conf" ]
 fi
 
 echo

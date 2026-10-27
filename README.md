@@ -395,6 +395,12 @@ installed root read-only, and asserts
   loads this install's own kernel/initramfs from `aelum/<id>/`; its options root
   at `root=UUID=…` (never a `/dev/mapper` path), carry `rd.luks.name=` (LUKS),
   and add `rootflags=subvol=@` only for btrfs.
+- (btrfs) snapper is installed and configured for `@` and `@home` with their
+  `.snapshots` subvolumes, quotas and timeline units enabled; pacman's pre/post
+  transaction snapshot hooks exist and are ordered around the transaction; and the
+  pieces that make snapshots bootable are in place — `/usr/local/bin/aelum-refind-snapshots`,
+  its enabled service, the snapper plugin, and the `aelum/<id>-snapshots.conf`
+  fragment `refind.conf` includes. An ext4 install is checked to have **none** of it.
 
 `verify-installed.sh` never calls the installer, so it validates the on-disk
 result rather than the code that produced it. Set `VERIFY=0` to skip it.
