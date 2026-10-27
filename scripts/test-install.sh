@@ -38,9 +38,14 @@ set -uo pipefail
 # Scripts live in scripts/; the project root (output/, vdisk, firmware, logs/)
 # is the parent of this script.
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# The distro workspace is one level above this repo and holds shared/, the host
+# side of the VM's /shared mount. Deriving it keeps SHARED_INSTALLER=1 pointed at
+# the trees this checkout actually contains: a hard-coded home path silently
+# tested whatever stale binary happened to sit there.
+DISTRO_DIR="$(cd "$PROFILE_DIR/.." && pwd)"
 ISO="${ISO:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 MODE="${MODE:-auto}"                       # auto | boot
-SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"  # host dir mounted at /shared in the VM
+SHARED_DIR="${SHARED_DIR:-$DISTRO_DIR/shared}"  # host dir mounted at /shared in the VM
 SHARED_INSTALLER="${SHARED_INSTALLER:-0}"          # auto mode: install using /shared/aelum-installer-cli instead of the baked-in one (0 | 1)
 ROOT_PASS="${ROOT_PASS:-}"                 # empty-password SSH (PermitEmptyPasswords yes on the live ISO)
 USERNAME="${USERNAME:-aelum}"              # account created by the installer (auto mode)
@@ -187,7 +192,10 @@ QEMU_ARGS=(
 # boot mode always, and in auto mode when SHARED_INSTALLER=1 so the test can
 # drive the install from /shared instead of the baked-in CLI.
 if [ "$MODE" = "boot" ] || [ "$SHARED_INSTALLER" = "1" ]; then
-    [ -d "$SHARED_DIR" ] || fail "MODE=boot but SHARED_DIR not found: $SHARED_DIR"
+    # A fresh checkout has no shared/ (it holds artifacts only), and QEMU cannot
+    # export a directory that is absent.
+    mkdir -p "$SHARED_DIR" 2>/dev/null
+    [ -d "$SHARED_DIR" ] || fail "SHARED_DIR not found and could not be created: $SHARED_DIR"
     QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
 fi
 

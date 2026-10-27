@@ -4,6 +4,8 @@ set -euo pipefail
 # Scripts live in scripts/; the project root (output/, firmware, vdisk) is the
 # parent of this script.
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shared/ (the VM's /shared mount) lives in the distro workspace above this repo.
+DISTRO_DIR="$(cd "$PROFILE_DIR/.." && pwd)"
 
 ISO="${1:-$(find "$PROFILE_DIR/output" -maxdepth 1 -name "*.iso" 2>/dev/null | sort | tail -1)}"
 
@@ -15,7 +17,7 @@ fi
 echo "Using ISO: $ISO"
 
 # --- Shared Directory ---
-SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}"
+SHARED_DIR="${SHARED_DIR:-$DISTRO_DIR/shared}"
 mkdir -p "$SHARED_DIR"
 
 # --- UEFI firmware setup ---

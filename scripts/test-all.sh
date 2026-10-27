@@ -25,6 +25,7 @@
 set -uo pipefail
 
 PROFILE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DISTRO_DIR="$(cd "$PROFILE_DIR/.." && pwd)"
 TEST="$PROFILE_DIR/scripts/test-install.sh"
 
 MODES="${MODES:-auto manual}"
@@ -62,7 +63,7 @@ for mode in $MODES; do
                      QEMU_QVM="${QEMU_QVM:-1}" \
                      DISK_PATH="${DISK_PATH:-/dev/vda}" \
                      VERIFY="${VERIFY:-1}" \
-                     SHARED_DIR="${SHARED_DIR:-$HOME/Projects/shared}" \
+                     SHARED_DIR="${SHARED_DIR:-$DISTRO_DIR/shared}" \
                      ISO="${ISO:-}" \
                      "$TEST" 2>&1 | tee "$logfile"; then
                     echo ">>> PASS: $cell"
