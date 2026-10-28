@@ -90,7 +90,17 @@ fi
 # ── Mount the installed system read-only ──────────────────────────────────────
 mkdir -p "$MNT"
 if [ "$FILESYSTEM" = btrfs ]; then
-    mount -o ro,subvol=@ "$rootdev" "$MNT" || { echo "FATAL: could not mount $rootdev (subvol=@)"; exit 1; }
+    # No subvol=: the system is whatever the filesystem's default subvolume is.
+    # That is the contract the installer writes, and the pointer a rollback moves.
+    mount -o ro "$rootdev" "$MNT" || { echo "FATAL: could not mount the default subvolume of $rootdev"; exit 1; }
+    # The history is a separate mount, exactly as the installed system mounts it: a
+    # snapshot never contains the subvolumes inside its parent, so the live root only
+    # has an empty placeholder for this to land on.
+    history_subvol="$(btrfs subvolume list "$MNT" 2>/dev/null | awk '$NF ~ /(^|\/)\.snapshots$/ { print $NF; exit }')"
+    if [ -n "$history_subvol" ]; then
+        mount -o ro,subvol="$history_subvol" "$rootdev" "$MNT/.snapshots" \
+            || echo "  note - could not mount $history_subvol; snapshot checks may fail"
+    fi
 else
     mount -o ro "$rootdev" "$MNT" || { echo "FATAL: could not mount $rootdev"; exit 1; }
 fi
@@ -123,6 +133,15 @@ check "fstab bind-mounts this install's boot dir at /boot" \
 check "fstab references the root filesystem UUID" fstab_has "$root_uuid"
 if [ "$FILESYSTEM" = btrfs ]; then
     check "fstab mounts /home as the @home subvolume" fstab_has "^UUID=$root_uuid[[:space:]]+/home[[:space:]]+btrfs.*subvol=@home"
+    # The root mount names no subvolume: the boot follows the filesystem's default
+    # subvolume, and a rollback moves that pointer. A pinned subvol= here would make
+    # the rollback change a state nothing mounts.
+    check "fstab mounts / without naming a subvolume" \
+        not fstab_has "^UUID=$root_uuid[[:space:]]+/[[:space:]]+btrfs.*subvol="
+    # Without this mount the restored system has an empty .snapshots and snapper
+    # stops working in it.
+    check "fstab mounts the snapshot history at /.snapshots" \
+        fstab_has "^UUID=$root_uuid[[:space:]]+/.snapshots[[:space:]]+btrfs.*subvol=.*\.snapshots"
 elif [ "$LVM" = 1 ]; then
     # ext4 + LVM keeps /home on its own logical volume.
     home_uuid="$(blkid -o value -s UUID "$home_lv")"
@@ -237,7 +256,10 @@ if [ "$LVM" = 1 ]; then
     check "entry root UUID is the root LV filesystem UUID" [ "$entry_root" = "$root_uuid" ]
 fi
 if [ "$FILESYSTEM" = btrfs ]; then
-    check "entry has rootflags=subvol=@ (btrfs)" has "$opts" 'rootflags=subvol=@'
+    # No rootflags= at all: the entry must let the kernel mount the filesystem's
+    # default subvolume, so a rollback changes what boots without this entry ever
+    # being rewritten.
+    check "entry names no subvolume (btrfs)" hasnt "$opts" 'rootflags='
 else
     check "entry has no btrfs rootflags (ext4)" hasnt "$opts" 'rootflags=subvol='
 fi
@@ -318,6 +340,43 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "snapper reads the root config's snapshot store" \
         snapper --no-dbus --root="$MNT" -c root list
 
+    # ── The layout snapper's rollback needs ───────────────────────────────
+    # snapper names the running system by the filesystem's default subvolume and only
+    # accepts it as one of its own numbered snapshots (Btrfs::getDefault -> idToNum).
+    # The installer installs into .snapshots/1/snapshot under @ and points the default
+    # subvolume at it, which is the sequence snapper's own installation-helper runs.
+    # Without this, `snapper rollback` refuses to run on the layout at all.
+    default_subvol="$(btrfs subvolume get-default "$MNT" 2>/dev/null)"
+    echo "  default subvolume: $default_subvol"
+    check "the default subvolume is a numbered snapshot" \
+        has "$default_subvol" 'path [^ ]*\.snapshots/[0-9]+/snapshot$'
+    check "the history is mounted where the live root can read it" \
+        findmnt -n -o SOURCE "$MNT/.snapshots"
+    check "the snapshot the system was installed into is described" \
+        grep -q 'first root filesystem' "$MNT/.snapshots"/[0-9]*/info.xml
+    check "the state this installer produced is snapshotted" \
+        grep -q 'after installation' "$MNT/.snapshots"/[0-9]*/info.xml
+
+    # That snapshot has to be the *finished* system, because it is the state a user
+    # restores to and the one the snapshot menu offers first. An enable step that
+    # runs after it is simply absent from it: measured on a real install, the
+    # factory snapshot had no display-manager.service and no NetworkManager, and
+    # booting it came up at a text login instead of the greeter.
+    factory_info="$(grep -l 'after installation' "$MNT/.snapshots"/[0-9]*/info.xml 2>/dev/null | head -1)"
+    factory=""
+    [ -n "$factory_info" ] && factory="$(dirname "$factory_info")/snapshot"
+    check "the factory snapshot is a tree on disk" test -d "$factory"
+    check "the factory snapshot boots the greeter" \
+        test -e "$factory/etc/systemd/system/display-manager.service"
+    check "the factory snapshot has NetworkManager enabled" \
+        test -e "$factory/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
+    # The same ordering, one step further: a snapshot boots the unit files the
+    # snapshot contains, so anything a snapshot boot needs has to be inside it.
+    check "the factory snapshot can rebuild its own boot menu" \
+        test -x "$factory/usr/local/bin/aelum-refind-snapshots"
+    check "the factory snapshot has the writable state dirs a snapshot boot needs" \
+        test -x "$factory/usr/lib/systemd/system-generators/aelum-snapshot-state"
+
     # ── Snapshots around pacman transactions ───────────────────────────────
     # A pre/post pair is the undo path for an update, so both halves must exist,
     # be ordered around the transaction, and be skipped when snapper is not there.
@@ -342,10 +401,11 @@ if [ "$FILESYSTEM" = btrfs ]; then
         grep -Eq '^Exec = .*--pre-number' "$post_hook"
 
     # ── Snapshots in the boot menu ─────────────────────────────────────────
-    # rEFInd shows exactly the stanzas its config contains, so the installed system
-    # has to own a generator, a trigger, and a fragment to write. The fragment is
-    # empty here (no snapshot has been taken yet); what matters is that the include
-    # is in place and the pieces that fill it are executable.
+    # rEFInd shows exactly the stanzas its config contains, so something has to own
+    # a generator, a trigger, and a fragment to write. The installer runs the
+    # generator itself at the end of the install (against the target, with --root),
+    # so the fragment is already filled here: an install whose first boot shows no
+    # recovery entry is a menu that was written one boot too late.
     generator="$MNT/usr/local/bin/aelum-refind-snapshots"
     plugin="$MNT/usr/lib/snapper/plugins/10-aelum-refind-snapshots"
     check "snapshot menu generator exists and is executable" [ -x "$generator" ]
@@ -353,10 +413,26 @@ if [ "$FILESYSTEM" = btrfs ]; then
         grep -qF 'EFI/refind/aelum/$install_id-snapshots.conf' "$generator"
     check "generator copies the boot options from the install's own entry" \
         grep -qF 'rootflags=subvol=$subvol_base/$1/snapshot' "$generator"
+    check "generator derives the history from the default subvolume" \
+        grep -qF 'btrfs subvolume get-default "$root"' "$generator"
+    check "generator can be run against a system it is not booted in" \
+        grep -qF -- '--root)' "$generator"
+    check "generator leaves the menu alone when the history is not mounted" \
+        grep -qF 'findmnt -n -o SOURCE "$snapshot_dir"' "$generator"
     check "generator lists the snapshots inside one menu entry" \
         grep -qF 'submenuentry' "$generator"
     check "generator boots the snapshot taken before a change" \
         grep -qF '[ "$type" = pre ]' "$generator"
+    check "generator prefers a snapshot marked important over a newer one" \
+        grep -qF '[ "$important" = yes ]' "$generator"
+    # A timeline snapshot is a timer that fired, not a state anyone chose to be
+    # able to return to: it stays in the submenu and never becomes the entry.
+    check "generator never makes a timeline snapshot the recovery entry" \
+        grep -qF 'case "$cleanup" in timeline) continue ;; esac' "$generator"
+    # The default subvolume is what this install's own entry boots and what a
+    # rollback moves; offering it would offer the user the state they are in.
+    check "generator does not offer the snapshot that is the current system" \
+        grep -qF 'if [ "$number" = "$default_number" ]; then' "$generator"
     check "snapper plugin exists and is executable" [ -x "$plugin" ]
     check "snapper plugin reacts to snapshot create and delete" \
         grep -qF 'create-snapshot-post|delete-snapshot-post' "$plugin"
@@ -369,10 +445,42 @@ if [ "$FILESYSTEM" = btrfs ]; then
 
     snapshot_entry="$refind_dir/aelum/$install_id-snapshots.conf"
     check "rEFInd snapshot menu fragment exists" [ -f "$snapshot_entry" ]
+    check "the menu is written before this install's first boot" \
+        grep -Eq '^[[:space:]]*menuentry ' "$snapshot_entry"
+    check "the menu offers the state this installer produced" \
+        grep -q 'after installation' "$snapshot_entry"
+    # Every snapshot entry has to name a subvolume that is really in the filesystem
+    # tree. A history path derived from the wrong root (".snapshots/2/snapshot"
+    # instead of "@/.snapshots/2/snapshot") reads fine, is listed in the menu, and
+    # boots nothing: the kernel cannot mount a root that is not there. btrfs reports
+    # these paths from the tree root whatever is mounted, so this is the same list
+    # the entries are naming paths in.
+    subvols=$(btrfs subvolume list "$MNT" 2>/dev/null | awk '{ print $NF }')
+    entry_roots=$(grep -oE 'rootflags=subvol=[^ "]+' "$snapshot_entry" | sed 's/^rootflags=subvol=//')
+    bad_roots=""
+    for want in $entry_roots; do
+        grep -qxF "$want" <<<"$subvols" || bad_roots="$bad_roots $want"
+    done
+    if [ -z "$entry_roots" ]; then
+        bad "no snapshot entry names a root subvolume"
+    elif [ -n "$bad_roots" ]; then
+        bad "snapshot entries name subvolumes that are not in the filesystem tree:$bad_roots"
+    else
+        ok "every snapshot entry names a subvolume that exists ($(printf '%s\n' "$entry_roots" | wc -l) of them)"
+    fi
+
     check "rEFInd config includes the snapshot menu fragment" \
         grep -Eq "^[[:space:]]*include[[:space:]]+aelum/$install_id-snapshots\.conf" "$conf"
     check "the live system is still the default selection" \
         grep -Eq '^[[:space:]]*default_selection[[:space:]]+"' "$conf"
+    # …and the menu does not offer it back: the entry above already boots it, and
+    # a snapshot listed here is meant to be a state to go *back to*.
+    default_root="$(printf '%s' "$default_subvol" | sed -n 's/.*path //p')"
+    if [ -n "$default_root" ] && grep -qF "rootflags=subvol=$default_root" "$snapshot_entry"; then
+        bad "the snapshot menu offers the subvolume the system already is ($default_root)"
+    else
+        ok "the snapshot menu does not offer the current system ($default_root)"
+    fi
 
     # An entry and its snapshots have to be listed together, in that order: a
     # plain filename sort would put "-snapshots.conf" before ".conf".
@@ -387,6 +495,50 @@ if [ "$FILESYSTEM" = btrfs ]; then
     # not ship it, the menu shows a fallback icon and snapshots look like systems.
     check "the theme ships the snapshot icon the menu uses" \
         [ -f "$refind_dir/themes/aelum/icons/os_snapshot.png" ]
+
+    # ── A snapshot boot reaches the greeter ────────────────────────────────
+    # A snapshot entry boots a read-only btrfs subvolume as /. systemd-logind's
+    # state directories are inside that root, and without them logind fails at
+    # STATE_DIRECTORY, hits its start limit and the boot lands in a text login -
+    # a recovery entry a user cannot use. The installer writes a systemd generator
+    # that emits a tmpfs mount for each of them, so a snapshot boot gets back the
+    # directories it lost and an ordinary boot gets nothing.
+    state_gen="$MNT/usr/lib/systemd/system-generators/aelum-snapshot-state"
+    check "snapshot state generator exists and is executable" [ -x "$state_gen" ]
+    check "state generator is a systemd generator (writes units into the directory it is given)" \
+        grep -qF 'gen_dir=${1:-}' "$state_gen"
+    # The detector, which is the definition of the feature and not a guess at it:
+    # the subvolume the root is on, against the one the system boots by default.
+    # A writability probe cannot be used here - measured on a real boot, the root
+    # is mounted read-only for the whole generator phase of an ordinary boot too.
+    check "state generator reads the subvolume the root is on" \
+        bash -c 'grep -qF "/proc/self/mountinfo" "$1" && grep -qF "subvolid=" "$1"' _ "$state_gen"
+    check "state generator reads the subvolume the system boots by default" \
+        grep -qF 'btrfs subvolume get-default /' "$state_gen"
+    check "state generator writes units only when those two differ" \
+        grep -qF '[ "$root_subvol" != "$default_subvol" ] || exit 0' "$state_gen"
+    check "state generator covers the directories a snapshot boot needs" \
+        bash -c 'grep -qF "/var/lib/systemd /var/lib/greeter" "$1"' _ "$state_gen"
+    check "state generator emits a tmpfs mount unit" \
+        bash -c 'grep -qF "echo \"Type=tmpfs\"" "$1"' _ "$state_gen"
+    # The window a fstab mount gets, plus the unit this exists for: ordered after
+    # the mount it lands the tmpfs before local-fs.target and therefore before
+    # systemd-logind starts.
+    check "state generator orders the mount before local-fs.target and logind" \
+        grep -qF 'Before=local-fs.target systemd-logind.service' "$state_gen"
+    # Measured, not assumed: ConditionPathIsReadWrite=!/ is unmet in a real
+    # snapshot boot, because a btrfs read-only subvolume mounted with rw looks
+    # read-write to the mount table. Using it would silently turn this off.
+    check "state generator does not decide with ConditionPathIsReadWrite" \
+        not bash -c 'grep -qE "^[[:space:]]*[^#]*ConditionPathIsReadWrite" "$1"' _ "$state_gen"
+    # Also measured: systemd passes a generator three arguments, and a bare $2
+    # under set -u failed the script on every boot - the same as having no
+    # generator. And ": > file" is a redirection on a special builtin, which exits
+    # the shell when the write fails.
+    check "state generator does not read a positional systemd need not pass" \
+        not bash -c 'grep -qE "^[[:space:]]*[^#]*\$[23]" "$1"' _ "$state_gen"
+    check "state generator does not redirect into a special builtin" \
+        not bash -c 'grep -qE "^[[:space:]]*[^#]*: > " "$1"' _ "$state_gen"
 else
     section "snapshots (snapper)"
     check "snapper is not installed (ext4)" not pkg_installed snapper
@@ -400,6 +552,8 @@ else
         [ ! -e "$MNT/usr/local/bin/aelum-refind-snapshots" ]
     check "no snapshot menu fragment (ext4)" \
         [ ! -e "$refind_dir/aelum/$install_id-snapshots.conf" ]
+    check "no snapshot state mounts (ext4)" \
+        [ ! -e "$MNT/usr/lib/systemd/system-generators/aelum-snapshot-state" ]
 fi
 
 echo
