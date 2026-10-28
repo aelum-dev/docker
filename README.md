@@ -385,8 +385,10 @@ installed root read-only, and asserts
 
 - the root filesystem matches `FILESYSTEM`;
 - `/etc/fstab` mounts `/`, the ESP at `/efi`, this install's `aelum/<id>/` boot
-  directory at `/boot` (bind), and (btrfs) `/home` with the `@home` subvolume,
-  with the right UUIDs — or (ext4 + LVM) `/home` on its own logical volume;
+  directory at `/boot` (bind), and (btrfs) `/home` with the `@home` subvolume and
+  the snapshot history at `/.snapshots`, with the right UUIDs — or (ext4 + LVM)
+  `/home` on its own logical volume; for btrfs it asserts the root mount names **no**
+  subvolume;
 - the LVM volume group and its logical volumes exist, and `/etc/mkinitcpio.conf`
   `HOOKS` include `lvm2` after `sd-encrypt` when both are enabled;
 - `/etc/mkinitcpio.conf` `HOOKS` include an encrypt hook when encrypted;
@@ -394,7 +396,11 @@ installed root read-only, and asserts
   fragment at `EFI/refind/aelum/<id>.conf` (included from `refind.conf`) that
   loads this install's own kernel/initramfs from `aelum/<id>/`; its options root
   at `root=UUID=…` (never a `/dev/mapper` path), carry `rd.luks.name=` (LUKS),
-  and add `rootflags=subvol=@` only for btrfs.
+  and name no subvolume at all (btrfs boots the filesystem's default subvolume, which
+  is what a rollback moves).
+- (btrfs) the layout snapper's rollback needs: the default subvolume is a numbered
+  snapshot (`@/.snapshots/1/snapshot`), the history is mounted where the live root can
+  read it, and the `first root filesystem` and `after installation` snapshots exist;
 - (btrfs) snapper is installed and configured for `@` and `@home` with their
   `.snapshots` subvolumes, quotas and timeline units enabled; pacman's pre/post
   transaction snapshot hooks exist and are ordered around the transaction; and the
@@ -402,7 +408,12 @@ installed root read-only, and asserts
   its enabled service, the snapper plugin, and the `aelum/<id>-snapshots.conf`
   fragment `refind.conf` includes **after** the install's own entry (a filename
   sort would list the snapshots first), pointing at an icon the theme really
-  ships. An ext4 install is checked to have **none** of it.
+  ships; every root the fragment names is a subvolume that really exists, the
+  fragment does not offer the subvolume the system already is, and the factory
+  snapshot contains the finished system (display-manager + NetworkManager enabled,
+  the menu generator, and `aelum-snapshot-state`, the generator that gives a
+  snapshot boot writable state directories). An ext4 install is checked to have
+  **none** of it.
 
 `verify-installed.sh` never calls the installer, so it validates the on-disk
 result rather than the code that produced it. Set `VERIFY=0` to skip it.
@@ -431,10 +442,11 @@ lists while iterating.
 ### Looking at the snapshot boot menu
 
 A btrfs install keeps snapper snapshots and offers them in rEFInd as one entry
-with the snapshots inside it. Three scripts cover that, from cheapest to real:
+with the snapshots inside it. Four scripts cover that, from cheapest to real:
 
 ```bash
 ./scripts/fake-snapshot-menu.sh        # the menu generator against a fixture: no disk, no root
+./scripts/fake-snapshot-state.sh       # the snapshot-boot state generator, same kind of fixture
 ./scripts/menu-shots.sh                # screenshots of the real menu, no QEMU window
 make demo-snapshots RESET=1            # five demo snapshots on the test disk
 ```
@@ -443,11 +455,25 @@ make demo-snapshots RESET=1            # five demo snapshots on the test disk
 `findmnt`, runs the generator the installer would install
 (`extract-snapshot-generator.sh` pulls it out of the installer's Go source), and
 asserts what the fragment must look like: one `menuentry`, every snapshot as a
-`submenuentry`, the newest *pre* snapshot as the one the entry boots, a pacman
-pair labelled by what it is, a person's description shown verbatim, dates kept,
-nothing outside rEFInd's ASCII font, the same output twice, no entry at all when
-there are no snapshots, and a failure when the ESP is not mounted. It is a host
-check: it says out loud that it does not touch the real mount table.
+`submenuentry`, the newest *pre* snapshot as the one the entry boots (else the
+newest `important=yes` one, and never a `timeline` snapshot), the states worth
+keeping still listed after a dozen timeline snapshots, the snapshot that *is* the
+system not offered at all, a pacman pair labelled by what it is, a person's
+description shown verbatim, dates kept, nothing outside rEFInd's ASCII font, the
+same output twice, no entry at all when there are no snapshots, and a failure
+when the ESP is not mounted. It is a host check: it says out loud that it does
+not touch the real mount table.
+
+**`fake-snapshot-state.sh`** runs the other generator the installer writes — the
+one that gives a snapshot boot the state directories its read-only root does not
+have — and checks the single decision it makes, using `mountinfo` and `btrfs
+subvolume get-default` output captured from a real install and a real snapshot
+boot of it. Ordinary boot (same subvolume id) → no units. Snapshot boot (a
+different id) → a tmpfs `.mount` unit per state directory, named the way systemd
+expects, ordered before `local-fs.target` and `systemd-logind.service`. A root
+with no subvolume id → nothing. It also calls the generator the way systemd does
+(the unit directory plus the two extra directories systemd passes), because a
+generator that only works when a test calls it correctly fails every real boot.
 
 **`menu-shots.sh`** boots what is on `vdisk.qcow2` headless (`HEADLESS=1
 MONITOR=… run-iso.sh`), waits for rEFInd to take over the screen, screenshots
@@ -464,11 +490,12 @@ KEEP_UP=1 ./scripts/menu-shots.sh
 
 Two things about a real menu, both learned the hard way:
 
-- The menu file is written by the **installed system** (its service runs at every
-  boot, and snapper's plugin after every snapshot). `make demo-snapshots` runs
-  from the live ISO, which cannot write it, so after a demo run the menu on the
-  ESP is one boot behind: run `menu-shots.sh --then-boot` once, and the
-  screenshots after that are current.
+- The menu file is written by `aelum-refind-snapshots`, which takes `--root <mount>`
+  so it can be run against a system it is not booted in: the installer runs it at
+  the end of an install, and `make demo-snapshots` mounts the install's ESP at
+  `/mnt/efi` and runs it from the live ISO. A menu written by an **older**
+  installer is still one boot behind that installer: run `menu-shots.sh
+  --then-boot` once, and the screenshots after that are current.
 - `test-install.sh` recreates `OVMF_VARS.fd` on every run, so after a
   `test-boot` the firmware has no `Aelum` entry. `make demo-snapshots` deletes
   stale entries and creates a fresh one; a stale entry pointing at a disk that
