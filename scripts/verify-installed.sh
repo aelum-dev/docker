@@ -273,6 +273,17 @@ fi
 section "installed system"
 check "system is populated (/etc/os-release present)" [ -s "$MNT/etc/os-release" ]
 
+# The resolver has to belong to the boot, not to the root it was installed into.
+# A snapshot boot mounts a read-only subvolume as /, and NetworkManager updates
+# /etc/resolv.conf by creating a temp file in the same directory and renaming it
+# over - which such a root refuses. Linked into /run (a tmpfs in every boot, and
+# the file NetworkManager always writes), the factory snapshot and every other
+# snapshot resolve on the network they are actually running on.
+check "resolver is a link into /run, not a file inside the root" \
+    bash -c '[ -L "$1/etc/resolv.conf" ]' _ "$MNT"
+check "the resolver link points at NetworkManager's runtime resolv.conf" \
+    bash -c '[ "$(readlink "$1/etc/resolv.conf")" = "/run/NetworkManager/resolv.conf" ]' _ "$MNT"
+
 # ── Snapshots (snapper) ───────────────────────────────────────────────────────
 # The installer configures snapper for the btrfs layout only: separate
 # subvolumes are what make a snapshot of @ cheap, and an ext4 install has no
@@ -288,6 +299,10 @@ if [ "$FILESYSTEM" = btrfs ]; then
     echo "  configs: $(printf '%s' "$names" | tr '\n' ' ')"
     check "exactly two snapper configs" [ "$(grep -c . <<<"$names")" -eq 2 ]
 
+    # The qgroups the installer gives each config (configure.snapperRootQGroup /
+    # snapperHomeQGroup): level-1 ids, which is the level snapper reserves for
+    # aggregates, one per config.
+    declare -A cfg_qgroup=([root]="1/0" [home]="1/1")
     for cfg in root home; do
         case "$cfg" in
             root) subvol="@";   subvol_re='^SUBVOLUME="/"$'   ;;
@@ -296,9 +311,42 @@ if [ "$FILESYSTEM" = btrfs ]; then
         content="$(cat "$config_dir/$cfg" 2>/dev/null)"
         check "config $cfg snapshots $subvol" has "$content" "$subvol_re"
         check "config $cfg is a btrfs config" has "$content" '^FSTYPE="btrfs"$'
-        check "config $cfg takes timeline snapshots" has "$content" '^TIMELINE_CREATE="yes"$'
-        check "config $cfg keeps timeline history" has "$content" '^TIMELINE_CLEANUP="yes"$'
+        # Timeline snapshots are off for the root, as they are in openSUSE's own
+        # default setup: the history of a system is the pairs its transactions take
+        # and the snapshots a rollback leaves, not a timer that fired. It also keeps
+        # a snapshot boot from adding to the history it booted from. Cleanup stays
+        # on so a user who turns the timeline on gets one that stays bounded.
+        check "config $cfg takes no timeline snapshots" has "$content" '^TIMELINE_CREATE="no"$'
+        check "config $cfg still cleans timeline history" has "$content" '^TIMELINE_CLEANUP="yes"$'
         check "config $cfg cleans pre/post pairs by count" has "$content" '^NUMBER_CLEANUP="yes"$'
+        # Every limit is a range. snapper skips its space-aware cleanup when a limit
+        # is degenerated (min == max, client/utils/Range.h), so single numbers here
+        # would make SPACE_LIMIT / FREE_LIMIT decorative.
+        for key in NUMBER_LIMIT NUMBER_LIMIT_IMPORTANT TIMELINE_LIMIT_HOURLY TIMELINE_LIMIT_DAILY \
+                   TIMELINE_LIMIT_WEEKLY TIMELINE_LIMIT_MONTHLY TIMELINE_LIMIT_YEARLY; do
+            range_re="^${key}=\"[0-9]+-[0-9]+\"$"
+            check "config $cfg bounds $key with a range" grep -qE "$range_re" "$config_dir/$cfg"
+        done
+        # QGROUP is the aggregate snapper measures a config's snapshots against.
+        # Quotas alone are not enough: prepare_quota throws "qgroup not set" and the
+        # cleanup falls back to counting. One group per config, because SPACE_LIMIT
+        # belongs to a config - a shared group would let @home snapshots delete the
+        # system's restore points.
+        check "config $cfg names its qgroup" has "$content" "^QGROUP=\"${cfg_qgroup[$cfg]}\"$"
+    done
+    # @home shares the filesystem with @, so its history is the smaller one; and no
+    # config may keep fewer important snapshots than ordinary ones, or a marked
+    # snapshot would be cleaned before an unmarked one.
+    limit_max() { sed -nE "s/^$2=\"[0-9]+-([0-9]+)\"$/\1/p" "$config_dir/$1" | head -1; }
+    root_max="$(limit_max root NUMBER_LIMIT)"; home_max="$(limit_max home NUMBER_LIMIT)"
+    echo "  limits: root NUMBER_LIMIT max=${root_max:-?}  home max=${home_max:-?}"
+    check "the home history is smaller than the system's (same filesystem)" \
+        bash -c '[[ -n "$1" && -n "$2" && "$2" -lt "$1" ]]' _ "$root_max" "$home_max"
+    for cfg in root home; do
+        ordinary="$(limit_max "$cfg" NUMBER_LIMIT)"
+        important="$(limit_max "$cfg" NUMBER_LIMIT_IMPORTANT)"
+        check "config $cfg keeps at least as many important ($important) as ordinary ($ordinary) snapshots" \
+            bash -c '[[ -n "$1" && -n "$2" && "$2" -ge "$1" ]]' _ "$ordinary" "$important"
     done
 
     check "SNAPPER_CONFIGS lists both configs" \
@@ -326,6 +374,16 @@ if [ "$FILESYSTEM" = btrfs ]; then
     echo "  quotas:"; btrfs quota status "$MNT" 2>/dev/null | sed 's/^/    /'
     check "btrfs quotas are enabled (snapper space limits)" \
         btrfs quota status --is-enabled "$MNT"
+    # The groups the configs name must exist, or every cleanup says "quota not
+    # working" and the limits never apply. A plain show lists them (with their
+    # "<0 member qgroups>" placeholder: snapper fills a group when it first runs a
+    # cleanup, not when the group is created). The path-filtering options do not:
+    # -F lists only the qgroups of the given subvolume, which hides a level-1 group
+    # that has no members yet.
+    qgroups="$(btrfs qgroup show "$MNT" 2>/dev/null | awk '{ print $1 }')"
+    echo "  qgroups: $(printf '%s' "$qgroups" | tr '\n' ' ')"
+    check "the qgroup the root config names exists" grep -qx '1/0' <<<"$qgroups"
+    check "the qgroup the home config names exists" grep -qx '1/1' <<<"$qgroups"
 
     for unit in snapperd snapper-timeline.timer snapper-cleanup.timer; do
         check "$unit is enabled" systemctl --root="$MNT" is-enabled "$unit"
@@ -382,23 +440,41 @@ if [ "$FILESYSTEM" = btrfs ]; then
     # be ordered around the transaction, and be skipped when snapper is not there.
     pre_hook="$MNT/etc/pacman.d/hooks/90-aelum-snapper-pre.hook"
     post_hook="$MNT/etc/pacman.d/hooks/91-aelum-snapper-post.hook"
-    for hook in "$pre_hook" "$post_hook"; do
+    important_hook="$MNT/etc/pacman.d/hooks/92-aelum-snapper-important-post.hook"
+    for hook in "$pre_hook" "$post_hook" "$important_hook"; do
         check "pacman hook $(basename "$hook") exists" [ -f "$hook" ]
         check "$(basename "$hook") is skipped when snapper is not installed" \
             grep -Eq '^Depends = snapper$' "$hook"
-        check "$(basename "$hook") triggers on package transactions" \
-            grep -Eq '^Target = \*$' "$hook"
         # pacman allows exactly one Type per hook: two declarations make it warn
         # and the last one silently wins.
         check "$(basename "$hook") declares exactly one Type" \
             [ "$(grep -c '^Type = ' "$hook")" = "1" ]
         check "$(basename "$hook") triggers on Type = Package" \
             grep -Eq '^Type = Package$' "$hook"
+        # --no-dbus: the default path asks snapperd, and a masked or crashed
+        # snapperd would drop the undo path silently - no message, no log, and an
+        # install that reported success. The hooks run as root.
+        check "$(basename "$hook") runs snapper directly, not through snapperd" \
+            grep -Eq 'snapper --no-dbus -c root' "$hook"
     done
+    check "the pre and post hooks trigger on every package transaction" \
+        bash -c 'grep -qE "^Target = \*$" "$1" && grep -qE "^Target = \*$" "$2"' _ "$pre_hook" "$post_hook"
     check "the pre hook snapshots @ before the transaction" \
         grep -Eq '^Exec = .* -c root create -t pre' "$pre_hook"
     check "the post hook pairs with the pre snapshot by number" \
         grep -Eq '^Exec = .*--pre-number' "$post_hook"
+    # A transaction killed between its two hooks leaves a number behind. Without
+    # clearing it the next transaction pairs with it, and the pair's diff spans two
+    # transactions.
+    check "the pre hook clears the state of an interrupted transaction" \
+        grep -Eq '^Exec = .*rm -f /run/aelum-snapper/pacman\.pre /run/aelum-snapper/pacman\.pair' "$pre_hook"
+    # The third half marks the pair the other two made: kernel, glibc, systemd,
+    # mkinitcpio, boot and display-driver transactions go in the important quota so
+    # a run of unrelated updates cannot evict the state a rollback is for.
+    check "the important hook marks the pair it did not create" \
+        grep -Eq '^Exec = .*modify -u important=yes' "$important_hook"
+    check "the important hook triggers only on system-changing packages" \
+        bash -c '! grep -qE "^Target = \*$" "$1" && grep -qE "^Target = [^#]*linux-lts[^#]*mkinitcpio[^#]*glibc[^#]*systemd" "$1"' _ "$important_hook"
 
     # ── Snapshots in the boot menu ─────────────────────────────────────────
     # rEFInd shows exactly the stanzas its config contains, so something has to own
@@ -434,8 +510,11 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "generator does not offer the snapshot that is the current system" \
         grep -qF 'if [ "$number" = "$default_number" ]; then' "$generator"
     check "snapper plugin exists and is executable" [ -x "$plugin" ]
-    check "snapper plugin reacts to snapshot create and delete" \
-        grep -qF 'create-snapshot-post|delete-snapshot-post' "$plugin"
+    # Not only create and delete: a transactional rollback changes the default
+    # subvolume and creates no snapshot, and snapper modify rewrites the description
+    # and important= marking a menu title is built from.
+    check "snapper plugin reacts to every change the menu shows" \
+        grep -qF 'create-snapshot-post|delete-snapshot-post|set-default-snapshot-post|modify-snapshot-post|set-read-only-post' "$plugin"
     check "snapper plugin only follows the root config" grep -qF '[ "$2" = "/" ]' "$plugin"
     check "aelum-refind-snapshots.service is enabled" \
         systemctl --root="$MNT" is-enabled aelum-refind-snapshots.service
@@ -521,6 +600,13 @@ if [ "$FILESYSTEM" = btrfs ]; then
         bash -c 'grep -qF "/var/lib/systemd /var/lib/greeter" "$1"' _ "$state_gen"
     check "state generator emits a tmpfs mount unit" \
         bash -c 'grep -qF "echo \"Type=tmpfs\"" "$1"' _ "$state_gen"
+    # A mount unit is started by whatever requires it. Measured on a real snapshot
+    # boot: /var/lib/systemd was mounted only because systemd-logind and four other
+    # units have RequiresMountsFor= on it, and /var/lib/greeter - which nobody asks
+    # for - stayed inactive while tmpfiles.d failed to chmod it. The generator has
+    # to do what systemd-fstab-generator does and link its units in.
+    check "state generator links its mounts into local-fs.target.requires" \
+        bash -c 'grep -qF "local-fs.target.requires" "$1" && grep -qF "ln -sf" "$1"' _ "$state_gen"
     # The window a fstab mount gets, plus the unit this exists for: ordered after
     # the mount it lands the tmpfs before local-fs.target and therefore before
     # systemd-logind starts.
@@ -539,15 +625,48 @@ if [ "$FILESYSTEM" = btrfs ]; then
         not bash -c 'grep -qE "^[[:space:]]*[^#]*\$[23]" "$1"' _ "$state_gen"
     check "state generator does not redirect into a special builtin" \
         not bash -c 'grep -qE "^[[:space:]]*[^#]*: > " "$1"' _ "$state_gen"
+
+    # ── A transaction pair can actually be taken ───────────────────────────
+    # Everything above asserts files. This runs the commands the hooks run, on the
+    # installed system, and removes what it made. The failure it is looking for is the
+    # one with no message: a pair that never happens - snapperd masked, a config that
+    # cannot create, a hook that silently no-ops - leaving an install that reported
+    # success and a boot menu that never gains a "Before system update" entry.
+    #
+    # Every other check reads a read-only mount; this one has to write, so it
+    # remounts and puts the read-only mount back.
+    section "a transaction pair can be taken"
+    if mount -o remount,rw "$MNT" >/dev/null 2>&1 && mount -o remount,rw "$MNT/.snapshots" >/dev/null 2>&1; then
+        pre="$(snapper --no-dbus --root="$MNT" -c root create -t pre -p -c number -d verify 2>/dev/null | tail -1)"
+        post=""
+        [[ "$pre" =~ ^[0-9]+$ ]] && post="$(snapper --no-dbus --root="$MNT" -c root create -t post --pre-number "$pre" -p -c number -d verify 2>/dev/null | tail -1)"
+        echo "  pair: pre=${pre:-none} post=${post:-none}"
+        check "the installed system can take a pre/post pair" \
+            bash -c '[[ "$1" =~ ^[0-9]+$ && "$2" =~ ^[0-9]+$ ]]' _ "$pre" "$post"
+        if [[ "$post" =~ ^[0-9]+$ ]]; then
+            # The third hook's command, applied to the pair the first two made:
+            # marking is what keeps this state out of the ordinary count quota.
+            snapper --no-dbus --root="$MNT" -c root modify -u important=yes "$pre" >/dev/null 2>&1
+            check "a snapshot of the installed system can be marked important" \
+                bash -c 'grep -q "<key>important</key>" "$1/.snapshots/$2/info.xml"' _ "$MNT" "$pre"
+            snapper --no-dbus --root="$MNT" -c root delete "$post" "$pre" >/dev/null 2>&1 ||
+                echo "  note - the verification pair was left behind; the number algorithm cleans it"
+        fi
+        mount -o remount,ro "$MNT/.snapshots" >/dev/null 2>&1
+        mount -o remount,ro "$MNT" >/dev/null 2>&1
+    else
+        bad "could not remount the installed system read-write to take a test pair"
+    fi
 else
     section "snapshots (snapper)"
     check "snapper is not installed (ext4)" not pkg_installed snapper
     check "btrfs-assistant is not installed (ext4)" not pkg_installed btrfs-assistant
     check "no snapper configs (ext4)" [ ! -d "$MNT/etc/snapper/configs" ]
     check "no pacman snapshot hooks (ext4)" \
-        bash -c '[[ ! -e "$1" && ! -e "$2" ]]' _ \
+        bash -c '[[ ! -e "$1" && ! -e "$2" && ! -e "$3" ]]' _ \
             "$MNT/etc/pacman.d/hooks/90-aelum-snapper-pre.hook" \
-            "$MNT/etc/pacman.d/hooks/91-aelum-snapper-post.hook"
+            "$MNT/etc/pacman.d/hooks/91-aelum-snapper-post.hook" \
+            "$MNT/etc/pacman.d/hooks/92-aelum-snapper-important-post.hook"
     check "no snapshot menu generator (ext4)" \
         [ ! -e "$MNT/usr/local/bin/aelum-refind-snapshots" ]
     check "no snapshot menu fragment (ext4)" \
