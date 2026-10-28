@@ -93,8 +93,8 @@ if [ "$HEADLESS" = 1 ]; then
     QEMU_ARGS+=(-display none -nodefaults -vga std)
 else
     QEMU_ARGS+=(
-        -display sdl,gl=on
-        -device virtio-vga-gl,xres=$XRES,yres=$YRES,edid=on
+        -display gtk
+        -device secondary-vga,edid=on,xres=1920,yres=1080
         -device virtio-serial-pci
         -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
         -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on
