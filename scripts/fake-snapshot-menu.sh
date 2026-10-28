@@ -282,6 +282,30 @@ check "the old system snapshot is offered again" grep -qE 'submenuentry "Snapsho
 reset_snapshots
 code=$(run)
 
+echo "== the history is at the filesystem tree root =="
+# A disk someone built by hand, or a set-default on the tree root: the default
+# subvolume is inside .snapshots with no "@" in front of it. The container case
+# that handles "@/.snapshots/N/snapshot" does not match that spelling, and falling
+# through made the container the snapshot itself - a history named
+# ".snapshots/1/snapshot/.snapshots", which is a root no filesystem can mount.
+mkdir -p "$FAKE/bin-toplevel"
+cat >"$FAKE/bin-toplevel/btrfs" <<'STUB'
+#!/bin/sh
+case "$*" in
+    *"subvolume get-default"*) echo "ID 266 gen 1 top level 5 path .snapshots/1/snapshot" ;;
+    *)                        exit 0 ;;
+esac
+STUB
+chmod +x "$FAKE/bin-toplevel/btrfs"
+code=$(run_path "$FAKE/bin-toplevel:$BIN:$PATH")
+[ "$code" = 0 ] && ok "generator exits 0 (got $code)" || bad "generator exited $code: $(cat "$FAKE/run.err")"
+check "the history is named from the tree root" grep -q 'rootflags=subvol=\.snapshots/' "$FRAGMENT"
+absent "the container is never the snapshot itself" 'snapshot/\.snapshots' "$FRAGMENT"
+want_count 7 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count with a top-level history"
+absent "the snapshot that is the system is still not offered" 'Snapshot 1 -|rootflags=subvol=\.snapshots/1/snapshot' "$FRAGMENT"
+reset_snapshots
+code=$(run)
+
 echo "== timeline snapshots are listed, never booted as the entry =="
 # snapper-timeline.timer takes a snapshot on a schedule. It is the "when did this
 # break?" history, so it belongs in the submenu - but a timer that fired at 03:00

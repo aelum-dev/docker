@@ -83,12 +83,14 @@ run() {
     [ "$rc" = 0 ] && ok "$label: exits 0" || bad "$label: exited $rc: $(cat "$FAKE/$label.err")"
 }
 
-units() { ls -1 "$GENDIR" 2>/dev/null | tr '\n' ' '; }
+units() { ls -1 "$GENDIR" 2>/dev/null | grep '\.mount$' | tr '\n' ' '; }
+requires() { ls -1 "$GENDIR/local-fs.target.requires" 2>/dev/null | tr '\n' ' '; }
 
 echo "== an ordinary boot: the root is the subvolume the system normally boots =="
 reset_dir
 run ordinary "$FAKE/mountinfo-normal"
 [ -z "$(units)" ] && ok "no unit written (got: $(units))" || bad "units written for an ordinary boot: $(units)"
+[ ! -d "$GENDIR/local-fs.target.requires" ] && ok "no pull-in either" || bad "local-fs.target.requires written for an ordinary boot"
 
 echo "== a snapshot boot: the root is some other subvolume =="
 reset_dir
@@ -111,6 +113,21 @@ check "it is ordered after local-fs-pre.target" grep -qE '^After=local-fs-pre\.t
 # nothing else on a read-only root can.
 check "it creates the mount point if the snapshot does not have one" \
     grep -qE '^Options=.*X-mount\.mkdir' "$UNIT_SYS"
+# Writing a mount unit does not start it: a mount unit runs when something
+# requires it. systemd's own generators link them from
+# local-fs.target.requires/, and so does this one. Measured on a real snapshot
+# boot: /var/lib/systemd was mounted only because systemd-logind and five other
+# units have RequiresMountsFor= on it, and /var/lib/greeter - which nobody asks
+# for - stayed inactive while tmpfiles.d failed to chmod it.
+check "local-fs.target requires the unit (otherwise it is never started)" \
+    test -L "$GENDIR/local-fs.target.requires/var-lib-systemd.mount"
+check "the pull-in resolves to the unit that was written" \
+    test -e "$GENDIR/local-fs.target.requires/var-lib-systemd.mount"
+check "the greeter's state directory is pulled in too" \
+    test -L "$GENDIR/local-fs.target.requires/var-lib-greeter.mount"
+[ "$(requires)" = "var-lib-greeter.mount var-lib-systemd.mount " ] &&
+    ok "one pull-in per state directory, and nothing else (got: $(requires))" ||
+    bad "local-fs.target.requires holds: $(requires)"
 absent "it is not a service" '^\[Service\]' "$UNIT_SYS"
 absent "it does not decide with ConditionPathIsReadWrite (unmet in a real snapshot boot)" 'ConditionPathIsReadWrite' "$UNIT_SYS"
 
