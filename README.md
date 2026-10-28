@@ -442,13 +442,14 @@ lists while iterating.
 ### Looking at the snapshot boot menu
 
 A btrfs install keeps snapper snapshots and offers them in rEFInd as one entry
-with the snapshots inside it. Four scripts cover that, from cheapest to real:
+with the snapshots inside it. Five scripts cover that, from cheapest to real:
 
 ```bash
 ./scripts/fake-snapshot-menu.sh        # the menu generator against a fixture: no disk, no root
 ./scripts/fake-snapshot-state.sh       # the snapshot-boot state generator, same kind of fixture
 ./scripts/menu-shots.sh                # screenshots of the real menu, no QEMU window
 make demo-snapshots RESET=1            # five demo snapshots on the test disk
+make snapshot-rollback                 # boot a snapshot -> snapper rollback -> reboot -> assert
 ```
 
 **`fake-snapshot-menu.sh`** builds a fake ESP, a fake snapper store and a stub
@@ -474,6 +475,22 @@ expects, ordered before `local-fs.target` and `systemd-logind.service`. A root
 with no subvolume id → nothing. It also calls the generator the way systemd does
 (the unit directory plus the two extra directories systemd passes), because a
 generator that only works when a test calls it correctly fails every real boot.
+
+**`test-snapshot-rollback.sh`** is the acceptance test, and the only one of these
+that runs a whole feature rather than a generator: it boots what is installed on
+`vdisk.qcow2`, takes a snapshot, writes a marker into the live system *after* it,
+boots that snapshot through the menu entry the installed system itself generated,
+asserts the shape of a snapshot boot (read-only `/`, the live `/home`, the history
+mounted, the state directories writable, the greeter reached, the network up),
+prints what that boot logs about the read-only root, runs `snapper rollback` with
+no number from inside it, reboots through the install's own entry — which names no
+subvolume and so follows the pointer the rollback just moved — and asserts the
+system that comes up is the restored one: marker gone, root writable, `snapper -c
+root list` working, the undo snapshot listed, every menu entry still naming a
+subvolume that exists. It reaches the guest as the install's own user over SSH,
+because that is how a user would reach a recovery entry, and it drives the boot by
+writing rEFInd's `default_selection` — the same line a keypress chooses. It starts
+and stops the VM itself, so no `test-boot` may be holding the disk.
 
 **`menu-shots.sh`** boots what is on `vdisk.qcow2` headless (`HEADLESS=1
 MONITOR=… run-iso.sh`), waits for rEFInd to take over the screen, screenshots
@@ -522,6 +539,8 @@ Two things about a real menu, both learned the hard way:
 │   ├── qemu-mon.py            # send QEMU monitor commands over its unix socket
 │   ├── extract-snapshot-generator.sh  # write out the boot-menu generator from the installer source
 │   ├── fake-snapshot-menu.sh  # run that generator against a fixture (no disk, no root)
+│   ├── fake-snapshot-state.sh # run the snapshot-boot state generator against a fixture
+│   ├── test-snapshot-rollback.sh  # boot a snapshot -> snapper rollback -> reboot -> assert
 │   ├── release.sh             # entry point: load secrets, sign, upload, update site
 │   ├── sign-iso.sh            # sign + checksum the ISO (GPG) for release
 │   ├── gen-release-metadata.sh    # build latest.json + website release.ts

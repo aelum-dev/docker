@@ -1,6 +1,6 @@
 .PHONY: help build local-build build-local local-clean image update dev local-dev attach stop clean \
         release release-sign release-upload release-website wkd \
-        run run-clean run-disk vm-clean test test-one test-boot test-matrix demo-snapshots
+        run run-clean run-disk vm-clean test test-one test-boot test-matrix demo-snapshots snapshot-rollback
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -54,6 +54,7 @@ help:
 	@echo "  make test-one MANUAL=1  single manual install (formats Boot + System)"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 	@echo "  make demo-snapshots   Put 5 demo snapshots on the test disk (needs test-boot running)"
+	@echo "  make snapshot-rollback  Boot a snapshot -> snapper rollback -> reboot -> assert (needs an install on the test disk)"
 
 # ===========================================================================
 # Docker — ISO build pipeline (privileged container, writes ISO to output/)
@@ -284,3 +285,13 @@ demo-snapshots:
 	@ssh -p $(SSH_PORT) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost \
 		'mount /dev/vda2 /mnt || { echo "could not mount the installed system (LUKS or LVM install? mount its default subvolume yourself, then run /shared/demo-snapshots.sh --root /mnt)"; exit 1; }; mount -o subvol=@/.snapshots /dev/vda2 /mnt/.snapshots || echo "note: could not mount @/.snapshots; snapper cannot see the history"; mount /dev/vda1 /mnt/efi || echo "note: could not mount the ESP; the boot menu is left to the next boot"; /shared/demo-snapshots.sh --root /mnt $(DEMO_FLAGS); sync; umount -R /mnt; efibootmgr 2>/dev/null | sed -n "s/^Boot\([0-9]*\)\* Aelum.*/\1/p" | xargs -r -n1 -I{} sh -c "efibootmgr -b {} -D >/dev/null"; efibootmgr -c -d /dev/vda -p 1 -L Aelum -l "\\EFI\\refind\\refind_x64.efi" >/dev/null; poweroff'
 	@echo "Next:  make -C docker run-disk   (then select the snapshot icon and press F2)"
+
+## snapshot-rollback: the acceptance test for the snapshot feature, against the
+##       real disk: boot a snapshot through the menu entry the installed system
+##       wrote, roll back from inside it, reboot through the install's own entry,
+##       assert the restored system. It starts and stops the VM itself, so no
+##       test-boot may be holding vdisk.qcow2.
+##   make test-one FILESYSTEM=btrfs && make snapshot-rollback
+##   make snapshot-rollback SNAPSHOT=7   choose the snapshot to restore
+snapshot-rollback:
+	@./scripts/test-snapshot-rollback.sh
