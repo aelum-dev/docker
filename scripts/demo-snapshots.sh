@@ -19,9 +19,9 @@
 #
 # The boot menu is written by the installed system: aelum-refind-snapshots.service
 # runs at every boot and snapper's plugin starts it after every snapshot. With
-# --root this script cannot run that generator (it resolves the ESP and the root
-# filesystem from the live mount table), so the menu catches up when the installed
-# system boots.
+# --root this script runs that same generator itself (it takes a root for exactly
+# this case), so the menu is current here rather than one boot behind - mount the
+# install's ESP at <root>/efi for it to have somewhere to write.
 set -u
 
 usage() {
@@ -109,6 +109,11 @@ snap list
 if [ -z "$ROOT" ]; then
     systemctl start aelum-refind-snapshots.service 2>/dev/null ||
         echo "(run 'sudo systemctl start aelum-refind-snapshots.service' to rebuild the menu now)"
+elif [ -x "$ROOT/usr/local/bin/aelum-refind-snapshots" ]; then
+    # The same script the installed system runs, asked about this root: what the
+    # installer itself does before an install's first boot.
+    sh "$ROOT/usr/local/bin/aelum-refind-snapshots" --root "$ROOT" ||
+        echo "(the menu generator could not run: is the ESP mounted at $ROOT/efi?)"
 fi
 
 fragment=""
