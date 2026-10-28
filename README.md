@@ -241,7 +241,11 @@ Launches the latest ISO in `output/` in QEMU with:
 
 - KVM acceleration (`-cpu host`)
 - 4 cores, 4GB RAM
-- VirtIO GPU with GL (virgl), 1920×1080 (override with `XRES`/`YRES`)
+- VirtIO GPU with GL (virgl) composited on the host GPU in an SDL window,
+  1920×1080 (override with `XRES`/`YRES`). SDL has no fullscreen CLI option —
+  press `Ctrl+Alt+F` once the window opens. `UI=gtk` falls back to a GTK window
+  (opened fullscreen without borders by default, `FULLSCREEN=0` for a normal
+  window); `GL=0` falls back to plain VGA in either.
 - OVMF UEFI firmware (`OVMF_VARS.fd`; created from the system template if missing)
 - 20G VirtIO virtual disk (`vdisk.qcow2`; created if missing)
 - Shared directory (`../shared` in the distro workspace by default, override with `SHARED_DIR`, mapped as `shared`)

@@ -60,6 +60,20 @@ fi
 XRES="${XRES:-1920}"
 YRES="${YRES:-1080}"
 
+# --- GPU acceleration ------------------------------------------------------
+# GL=1 (the default) gives the guest a virtio-vga-gl (virgl 3D) and asks the
+# window to composite it on the host GPU. GL=0 falls back to the old plain
+# secondary-vga in a CPU-composited window.
+# UI=sdl (the default) is the backend that composites smoothly on this host;
+# UI=gtk is kept as a fallback (2c52743: an older QEMU showed a black
+# sdl,gl=on window here).
+# FULLSCREEN=1 applies to the GTK backend only: GTK fullscreen has no title bar
+# or borders and drops the menubar with them. This QEMU's SDL has no fullscreen
+# CLI option - press Ctrl+Alt+F once its window is open.
+GL="${GL:-1}"
+UI="${UI:-sdl}"
+FULLSCREEN="${FULLSCREEN:-1}"
+
 # --- Headless capture mode -----------------------------------------------
 # HEADLESS=1 draws nothing on the host and gives the guest a plain VGA, which is
 # the only thing QEMU's `screendump` can read: that is how the boot menu gets
@@ -92,9 +106,23 @@ if [ "$HEADLESS" = 1 ]; then
     # that would clash with the ones asked for above.
     QEMU_ARGS+=(-display none -nodefaults -vga std)
 else
+    DISPLAY_OPTS="$UI"
+    if [ "$GL" = 1 ]; then
+        DISPLAY_OPTS+=",gl=on"
+    fi
+    if [ "$UI" = gtk ] && [ "$FULLSCREEN" = 1 ]; then
+        DISPLAY_OPTS+=",full-screen=on,show-menubar=off"
+    fi
+
+    GPU_DEV="secondary-vga,edid=on,xres=$XRES,yres=$YRES"
+    if [ "$GL" = 1 ]; then
+        # virtio-vga-gl is the guest's whole display (firmware GOP and virgl 3D
+        # in the guest kernel); XRES/YRES are the EDID the guest desktop picks.
+        GPU_DEV="virtio-vga-gl,edid=on,xres=$XRES,yres=$YRES"
+    fi
     QEMU_ARGS+=(
-        -display gtk
-        -device secondary-vga,edid=on,xres=1920,yres=1080
+        -display "$DISPLAY_OPTS"
+        -device "$GPU_DEV"
         -device virtio-serial-pci
         -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
         -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on
