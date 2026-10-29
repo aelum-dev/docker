@@ -22,9 +22,10 @@
 #   3. assert the shape of a snapshot boot (read-only /, live /home, the history
 #      mounted, the state directories writable, the greeter reached, the boot
 #      announced for the restore prompt);
-#   4. the prompt's OK path: sudo -n /usr/local/bin/aelum-snapshot-restore, from
-#      inside the snapshot - the exact command the dialog runs through the narrow
-#      sudoers rule;
+#   4. the prompt's OK path: pkexec /usr/local/bin/aelum-snapshot-restore - the
+#      polkit action is granted to the active graphical session, so this asserts
+#      the scope (pkexec from this inactive SSH session must be refused) and then
+#      runs the exact command pkexec execs;
 #   5. reboot through the install's own entry, which names no subvolume and so
 #      follows the pointer the rollback moved;
 #   6. assert the system that comes up is the restored one: marker gone, root
@@ -79,12 +80,12 @@ as_root() {
         "$USERNAME@localhost" "sudo -S -p '' bash -c $(printf '%q' "$1")" 2>/dev/null
 }
 
-# root without a password, the way the snapshot prompt's OK button runs its helper
-# (sudo -n through the narrow sudoers rule). If the rule is missing this fails the
-# way the button would: "a password is required", not a silent fallback.
-as_nopasswd() {
-    sshpass -p "$USER_PASS" ssh "${SSH_OPTS[@]}" "$USERNAME@localhost" \
-        "sudo -n bash -c $(printf '%q' "$1")" 2>&1
+# Runs as the installed system's own user, with no sudo: this is the subject
+# pkexec sees. An SSH session is local but not active, so the snapshot-restore
+# action's grant (the local active session of an admin) does not apply here -
+# which is exactly what the polkit scope assertion needs.
+as_user() {
+    sshpass -p "$USER_PASS" ssh "${SSH_OPTS[@]}" "$USERNAME@localhost" "$1" 2>&1
 }
 
 wait_for_ssh() { # wait_for_ssh <seconds>
@@ -230,12 +231,24 @@ as_root "journalctl -b --no-pager 2>/dev/null | grep -i 'Read-only file system' 
     sed 's/^/    /'
 
 # ── 4. roll back from inside it ───────────────────────────────────────────────
-step "the prompt's OK path: sudo -n aelum-snapshot-restore, from inside the snapshot"
+step "the prompt's OK path: pkexec aelum-snapshot-restore, and its polkit scope"
+# The desktop's OK button runs `pkexec <helper>` from the active graphical
+# session, and the installed polkit rule grants it there: local, active, admin.
+# This SSH session is local but not active, so the same pkexec must be refused -
+# the scope is part of the feature, and a session that could never have shown
+# the dialog must not be able to answer it either. The unknown argument keeps
+# this safe either way: if the refusal were broken, the helper would print its
+# usage and roll nothing back.
+scope_out="$(as_user 'pkexec /usr/local/bin/aelum-snapshot-restore --scope-probe')"
+printf '%s\n' "$scope_out" | sed 's/^/    /'
+check "pkexec from this inactive session is refused (the grant is for active sessions)" \
+    bash -c 'grep -qiE "not authorized|authorization" <<<"$1"' _ "$scope_out"
+check "the refusal ran no helper (its usage line would mean it ran)" \
+    bash -c '! grep -q "usage: aelum-snapshot-restore" <<<"$1"' _ "$scope_out"
+# The exact command pkexec execs, run as root the way pkexec execs it.
 before_default="$root_subvol"
-rollback_out="$(as_nopasswd '/usr/local/bin/aelum-snapshot-restore 2>&1')"
+rollback_out="$(as_root '/usr/local/bin/aelum-snapshot-restore')"
 printf '%s\n' "$rollback_out" | sed 's/^/    /'
-check "the OK button's command needs no password" \
-    bash -c '! grep -qi "password is required" <<<"$1"' _ "$rollback_out"
 check "snapper took the classic ambit" grep -qi 'Ambit is classic' <<<"$rollback_out"
 check "snapper made the undo snapshot (a copy of the state that was broken)" \
     grep -qi 'read-only snapshot of default subvolume' <<<"$rollback_out"

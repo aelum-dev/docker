@@ -628,13 +628,16 @@ if [ "$FILESYSTEM" = btrfs ]; then
 
     # ── Restoring a booted snapshot ────────────────────────────────────────
     # A user who chose a snapshot in the menu is standing in a previous state; the
-    # restore path is what turns "you can go back" into a button. All three pieces
-    # are checked: the helper (the rollback, wrapped once), the narrow sudoers rule
-    # that lets the OK button run it without a password, and the desktop prompt
-    # (a Quickshell dialog in the user's live home, gated on the boot marker).
-    # The helper and the rule are root-side and must be inside the factory
-    # snapshot - a snapshot runs the binaries and rules it contains.
+    # restore path is what turns "you can go back" into a button. All the pieces
+    # are checked: the helper (the rollback, wrapped once), the polkit action its
+    # pkexec resolves to (policy refuses, local rule grants only the local active
+    # session of an admin - the person who pressed OK), and the desktop prompt
+    # (a Quickshell dialog, gated on the boot marker).
+    # The helper and the authorization files are root-side and must be inside the
+    # factory snapshot - a snapshot runs the binaries and rules it contains.
     restore_helper="$MNT/usr/local/bin/aelum-snapshot-restore"
+    polkit_policy="$MNT/usr/share/polkit-1/actions/dev.aelum.snapshot.restore.policy"
+    polkit_rules="$MNT/etc/polkit-1/rules.d/aelum-snapshot-restore.rules"
     check "state generator announces the snapshot boot for the prompt" \
         grep -qF '/run/aelum-snapshot-boot' "$state_gen"
     check "snapshot restore helper exists and is executable" [ -x "$restore_helper" ]
@@ -644,13 +647,24 @@ if [ "$FILESYSTEM" = btrfs ]; then
         grep -qF '/run/aelum-snapshot-boot' "$restore_helper"
     check "restore helper reboots without rolling back twice (the prompt's last button)" \
         grep -qF -- '--reboot-only)' "$restore_helper"
-    check "the prompt's OK button can run the helper without a password" \
-        grep -qE '^%wheel ALL=\(ALL\) NOPASSWD: /usr/local/bin/aelum-snapshot-restore$' \
-            "$MNT/etc/sudoers.d/aelum-snapshot-restore"
+    check "the OK button's pkexec resolves to a defined polkit action" \
+        bash -c 'grep -qF "<action id=\"dev.aelum.snapshot.restore\">" "$1" &&
+                 grep -qF "org.freedesktop.policykit.exec.path" "$1" &&
+                 grep -qF "/usr/local/bin/aelum-snapshot-restore" "$1"' _ "$polkit_policy"
+    check "the polkit policy refuses the action everywhere by default" \
+        bash -c 'grep -qF "<allow_any>no</allow_any>" "$1" &&
+                 grep -qF "<allow_inactive>no</allow_inactive>" "$1" &&
+                 grep -qF "<allow_active>no</allow_active>" "$1"' _ "$polkit_policy"
+    check "the grant is scoped to the local active session of an admin" \
+        bash -c 'grep -qF "polkit.addRule" "$1" && grep -qF "subject.local" "$1" &&
+                 grep -qF "subject.active" "$1" && grep -qF "polkit.user_is_admin" "$1"' _ "$polkit_rules"
+    check "the sudo mechanism is gone (no NOPASSWD drop-in for the helper)" \
+        [ ! -e "$MNT/etc/sudoers.d/aelum-snapshot-restore" ]
     check "the factory snapshot carries the restore helper" \
         test -x "$factory/usr/local/bin/aelum-snapshot-restore"
-    check "the factory snapshot carries the passwordless rule" \
-        test -e "$factory/etc/sudoers.d/aelum-snapshot-restore"
+    check "the factory snapshot carries the polkit policy and rule" \
+        bash -c 'test -f "$1/usr/share/polkit-1/actions/dev.aelum.snapshot.restore.policy" &&
+                 test -f "$1/etc/polkit-1/rules.d/aelum-snapshot-restore.rules"' _ "$factory"
     # The prompt is system-side config, not per-user: /etc/xdg/quickshell is a
     # Quickshell config directory for every user, and /etc/systemd/user is a unit
     # load path of every user manager. The prompt therefore belongs to the system
@@ -669,9 +683,13 @@ if [ "$FILESYSTEM" = btrfs ]; then
     # must be no system-side link - the greeter runs a Hyprland session too
     # (dms-greeter --command hyprland), is not in wheel, and did not choose a
     # snapshot, so it must not be asked. Its home is never seeded from skel.
+    # The link is asserted with -L, not -e: its target is an absolute path,
+    # and in a mounted (not booted) tree that resolves against the live ISO,
+    # where the unit does not exist. The link resolving is what the booted
+    # system's own session does, and test-snapshot-rollback.sh asserts it there.
     check "the prompt is pulled in by the seeded home, not by the system" \
-        bash -c 'test -e "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" &&
-                 [ ! -e "$1/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" ] &&
+        bash -c 'test -L "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" &&
+                 [ ! -L "$1/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" ] &&
                  [ ! -e "$1/var/lib/greeter/.config/systemd" ]' _ "$MNT"
     check "the prompt runs only on a snapshot boot" \
         grep -qF 'ConditionPathExists=/run/aelum-snapshot-boot' "$prompt_unit"
@@ -680,7 +698,7 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "the factory snapshot carries the prompt" \
         bash -c 'test -f "$1/etc/xdg/quickshell/aelum-snapshot/shell.qml" &&
                  test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service" &&
-                 test -e "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"' \
+                 test -L "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"' \
             _ "$factory"
 
     # ── A transaction pair can actually be taken ───────────────────────────
@@ -732,8 +750,10 @@ else
         [ ! -e "$MNT/usr/lib/systemd/system-generators/aelum-snapshot-state" ]
     check "no snapshot restore helper (ext4)" \
         [ ! -e "$MNT/usr/local/bin/aelum-snapshot-restore" ]
-    check "no restore sudoers rule (ext4)" \
-        [ ! -e "$MNT/etc/sudoers.d/aelum-snapshot-restore" ]
+    check "no snapshot restore polkit files (ext4)" \
+        bash -c '[[ ! -e "$1" && ! -e "$2" ]]' _ \
+            "$MNT/usr/share/polkit-1/actions/dev.aelum.snapshot.restore.policy" \
+            "$MNT/etc/polkit-1/rules.d/aelum-snapshot-restore.rules"
     check "no snapshot prompt (ext4)" \
         bash -c '[[ ! -e "$1/etc/xdg/quickshell/aelum-snapshot" && ! -e "$1/etc/systemd/user/aelum-snapshot-prompt.service" ]]' \
             _ "$MNT"
