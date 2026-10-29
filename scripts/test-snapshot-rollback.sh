@@ -215,8 +215,13 @@ check "the snapshot boot announced itself with this snapshot's number" \
     bash -c '[[ "$1" == "SNAPSHOT=$2" ]]' _ "$marker" "$snapshot"
 check "the restore prompt is installed system-side" \
     as_root "test -f /etc/xdg/quickshell/aelum-snapshot/shell.qml"
-check "the prompt unit is linked into the session target" \
-    as_root "test -e /etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
+# The pull-in is the home's wants link (seeded by /etc/skel), not a
+# system-side one: this booted user's session is what starts the prompt unit,
+# and the greeter - which must not be asked - has no such link.
+check "this user's session target wants the prompt" \
+    as_root "test -e /home/$USERNAME/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
+check "there is no system-side pull-in (the greeter is not asked)" \
+    as_root "test ! -e /etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
 
 # What a snapshot boot costs, reported rather than asserted: the point is knowing
 # which services fail a step and which only log. Recorded in SNAPSHOT_RESTORE.md.

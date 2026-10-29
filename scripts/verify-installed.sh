@@ -664,14 +664,23 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "the prompt offers CANCEL as well as OK" \
         bash -c 'grep -qF "CANCEL" "$1" && grep -qF "OK" "$1"' _ "$prompt_qml"
     check "the prompt unit exists" test -f "$prompt_unit"
-    check "the session target wants the prompt" \
-        test -e "$MNT/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
+    # The pull-in is per-home on purpose: the wants link is seeded into every
+    # real home by /etc/skel (the same way dms.service is started), and there
+    # must be no system-side link - the greeter runs a Hyprland session too
+    # (dms-greeter --command hyprland), is not in wheel, and did not choose a
+    # snapshot, so it must not be asked. Its home is never seeded from skel.
+    check "the prompt is pulled in by the seeded home, not by the system" \
+        bash -c 'test -e "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" &&
+                 [ ! -e "$1/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" ] &&
+                 [ ! -e "$1/var/lib/greeter/.config/systemd" ]' _ "$MNT"
     check "the prompt runs only on a snapshot boot" \
         grep -qF 'ConditionPathExists=/run/aelum-snapshot-boot' "$prompt_unit"
     check "the prompt reads the snapshot number from the boot marker" \
         grep -qF 'EnvironmentFile=/run/aelum-snapshot-boot' "$prompt_unit"
     check "the factory snapshot carries the prompt" \
-        bash -c 'test -f "$1/etc/xdg/quickshell/aelum-snapshot/shell.qml" && test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service"' \
+        bash -c 'test -f "$1/etc/xdg/quickshell/aelum-snapshot/shell.qml" &&
+                 test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service" &&
+                 test -e "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"' \
             _ "$factory"
 
     # ── A transaction pair can actually be taken ───────────────────────────
