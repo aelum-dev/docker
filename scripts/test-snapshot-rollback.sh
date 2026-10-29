@@ -20,12 +20,16 @@
 #      is something the snapshot does not have;
 #   2. boot that snapshot through its own rEFInd entry;
 #   3. assert the shape of a snapshot boot (read-only /, live /home, the history
-#      mounted, the state directories writable, the greeter reached);
-#   4. `snapper rollback` with no number, from inside it;
+#      mounted, the state directories writable, the greeter reached, the boot
+#      announced for the restore prompt);
+#   4. the prompt's OK path: sudo -n /usr/local/bin/aelum-snapshot-restore, from
+#      inside the snapshot - the exact command the dialog runs through the narrow
+#      sudoers rule;
 #   5. reboot through the install's own entry, which names no subvolume and so
 #      follows the pointer the rollback moved;
 #   6. assert the system that comes up is the restored one: marker gone, root
-#      writable, the undo snapshot listed, the menu still naming real subvolumes.
+#      writable, no snapshot-boot announcement, the undo snapshot listed, the menu
+#      still naming real subvolumes.
 #
 # Getting into a snapshot without a keyboard is the one trick: rEFInd counts down
 # to its default_selection, so this writes the snapshot entry into
@@ -73,6 +77,14 @@ SSH_OPTS=(-p "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/
 as_root() {
     printf '%s\n' "$USER_PASS" | sshpass -p "$USER_PASS" ssh "${SSH_OPTS[@]}" \
         "$USERNAME@localhost" "sudo -S -p '' bash -c $(printf '%q' "$1")" 2>/dev/null
+}
+
+# root without a password, the way the snapshot prompt's OK button runs its helper
+# (sudo -n through the narrow sudoers rule). If the rule is missing this fails the
+# way the button would: "a password is required", not a silent fallback.
+as_nopasswd() {
+    sshpass -p "$USER_PASS" ssh "${SSH_OPTS[@]}" "$USERNAME@localhost" \
+        "sudo -n bash -c $(printf '%q' "$1")" 2>&1
 }
 
 wait_for_ssh() { # wait_for_ssh <seconds>
@@ -191,6 +203,21 @@ done
 check "the greeter is reached, not a text login" as_root 'systemctl is-active greetd | grep -q active'
 check "the network is up (this session is over it)" as_root 'true'
 
+# What the desktop prompt is built from: the generator announced this boot and
+# named the snapshot, and the prompt's unit + config are installed system-side
+# (/etc/xdg/quickshell + /etc/systemd/user), so they belong to the system and
+# not to any one account - and they are inside the very snapshot being booted.
+# The unit itself is only observable in a graphical session; the marker and the
+# files are the parts this test can assert, and the next step drives the exact
+# command the OK button runs.
+marker="$(as_root 'cat /run/aelum-snapshot-boot 2>/dev/null')"
+check "the snapshot boot announced itself with this snapshot's number" \
+    bash -c '[[ "$1" == "SNAPSHOT=$2" ]]' _ "$marker" "$snapshot"
+check "the restore prompt is installed system-side" \
+    as_root "test -f /etc/xdg/quickshell/aelum-snapshot/shell.qml"
+check "the prompt unit is linked into the session target" \
+    as_root "test -e /etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
+
 # What a snapshot boot costs, reported rather than asserted: the point is knowing
 # which services fail a step and which only log. Recorded in SNAPSHOT_RESTORE.md.
 step "what a snapshot boot logs"
@@ -198,10 +225,12 @@ as_root "journalctl -b --no-pager 2>/dev/null | grep -i 'Read-only file system' 
     sed 's/^/    /'
 
 # ── 4. roll back from inside it ───────────────────────────────────────────────
-step "snapper rollback, with no number, from inside the snapshot"
+step "the prompt's OK path: sudo -n aelum-snapshot-restore, from inside the snapshot"
 before_default="$root_subvol"
-rollback_out="$(as_root 'snapper rollback 2>&1')"
+rollback_out="$(as_nopasswd '/usr/local/bin/aelum-snapshot-restore 2>&1')"
 printf '%s\n' "$rollback_out" | sed 's/^/    /'
+check "the OK button's command needs no password" \
+    bash -c '! grep -qi "password is required" <<<"$1"' _ "$rollback_out"
 check "snapper took the classic ambit" grep -qi 'Ambit is classic' <<<"$rollback_out"
 check "snapper made the undo snapshot (a copy of the state that was broken)" \
     grep -qi 'read-only snapshot of default subvolume' <<<"$rollback_out"
@@ -227,6 +256,8 @@ check "the default entry boots the restored system" bash -c '[[ "$1" == "$2" ]]'
 check "the restored root is writable" as_root 'touch /root/.aelum-write-probe && rm -f /root/.aelum-write-probe'
 check_not "the marker written after the snapshot is gone (the state we chose came back)" \
     as_root "test -f $MARKER"
+check_not "the restored system does not announce a snapshot boot (the prompt stays quiet)" \
+    as_root 'test -e /run/aelum-snapshot-boot'
 
 # ── 6. the history and the menu are still consistent ──────────────────────────
 step "the history and the boot menu after a rollback"

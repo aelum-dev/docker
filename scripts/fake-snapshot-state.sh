@@ -9,7 +9,8 @@ set -uo pipefail
 #
 # What it checks is the one decision the generator makes: the subvolume the root is
 # on is the one the system normally boots (an ordinary boot — write nothing) or it
-# is not (a snapshot boot — write a tmpfs mount for each state directory). The
+# is not (a snapshot boot — write a tmpfs mount for each state directory, and
+# announce the boot plus its snapshot number in /run/aelum-snapshot-boot). The
 # generator reads both halves from the running system, so the fixture feeds it real
 # mountinfo and `btrfs subvolume get-default` output captured from a real install
 # and a real snapshot boot of it. The seams only choose where the information comes
@@ -51,6 +52,7 @@ fi
 FAKE=$(mktemp -d /tmp/aelum-fake-snapshot-state.XXXXXX)
 [ "$KEEP" = 1 ] || trap 'rm -rf "$FAKE"' EXIT
 GENDIR="$FAKE/generator"
+MARKER="$FAKE/marker"
 UNIT_SYS="$GENDIR/var-lib-systemd.mount"
 UNIT_GREETER="$GENDIR/var-lib-greeter.mount"
 
@@ -70,13 +72,13 @@ printf '%s\n' "$MI_SNAPSHOT" > "$FAKE/mountinfo-snapshot"
 printf '%s\n' "$MI_OTHER"    > "$FAKE/mountinfo-other"
 printf '%s\n' "$GET_DEFAULT" > "$FAKE/get-default"
 
-reset_dir() { rm -rf "$GENDIR"; mkdir -p "$GENDIR"; }
+reset_dir() { rm -rf "$GENDIR"; mkdir -p "$GENDIR"; rm -f "$MARKER"; }
 
 # run <label> <mountinfo file> — called the way systemd calls a generator: the
 # unit directory first, then the two directories systemd adds.
 run() {
     local label=$1 mi=$2
-    AELUM_MOUNTINFO="$mi" AELUM_GET_DEFAULT="cat $FAKE/get-default" \
+    AELUM_MOUNTINFO="$mi" AELUM_GET_DEFAULT="cat $FAKE/get-default" AELUM_SNAPSHOT_MARKER="$MARKER" \
         sh "$GEN" "$GENDIR" "$FAKE/generator.early" "$FAKE/generator.late" \
         >"$FAKE/$label.out" 2>"$FAKE/$label.err"
     local rc=$?
@@ -91,6 +93,7 @@ reset_dir
 run ordinary "$FAKE/mountinfo-normal"
 [ -z "$(units)" ] && ok "no unit written (got: $(units))" || bad "units written for an ordinary boot: $(units)"
 [ ! -d "$GENDIR/local-fs.target.requires" ] && ok "no pull-in either" || bad "local-fs.target.requires written for an ordinary boot"
+[ ! -e "$MARKER" ] && ok "no boot marker either (the prompt unit is never gated on)" || bad "a snapshot boot was announced for an ordinary boot"
 
 echo "== a snapshot boot: the root is some other subvolume =="
 reset_dir
@@ -128,6 +131,12 @@ check "the greeter's state directory is pulled in too" \
 [ "$(requires)" = "var-lib-greeter.mount var-lib-systemd.mount " ] &&
     ok "one pull-in per state directory, and nothing else (got: $(requires))" ||
     bad "local-fs.target.requires holds: $(requires)"
+# The announcement the prompt is built on: the marker exists, and it names the
+# snapshot this root is on - the number cut from the same mountinfo entry the
+# detector reads. The prompt shows it, the restore helper is gated on the file.
+check "the snapshot boot is announced in the boot marker" test -f "$MARKER"
+check "the marker names the snapshot this root is on" grep -qxF 'SNAPSHOT=5' "$MARKER"
+absent "the marker is an EnvironmentFile-shaped KEY=value line, nothing else" '^[^S]' "$MARKER"
 absent "it is not a service" '^\[Service\]' "$UNIT_SYS"
 absent "it does not decide with ConditionPathIsReadWrite (unmet in a real snapshot boot)" 'ConditionPathIsReadWrite' "$UNIT_SYS"
 
@@ -135,6 +144,7 @@ echo "== a root that is not a btrfs subvolume: unknown means an ordinary boot ==
 reset_dir
 run other "$FAKE/mountinfo-other"
 [ -z "$(units)" ] && ok "no unit written (got: $(units))" || bad "units written for a root with no subvolume id: $(units)"
+[ ! -e "$MARKER" ] && ok "no boot marker either" || bad "a snapshot boot was announced for a root with no subvolume id"
 
 echo "== asked about the running system, with no help from the fixture =="
 # The real invocation: no seams set, so the generator reads /proc/self/mountinfo

@@ -626,6 +626,54 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "state generator does not redirect into a special builtin" \
         not bash -c 'grep -qE "^[[:space:]]*[^#]*: > " "$1"' _ "$state_gen"
 
+    # ── Restoring a booted snapshot ────────────────────────────────────────
+    # A user who chose a snapshot in the menu is standing in a previous state; the
+    # restore path is what turns "you can go back" into a button. All three pieces
+    # are checked: the helper (the rollback, wrapped once), the narrow sudoers rule
+    # that lets the OK button run it without a password, and the desktop prompt
+    # (a Quickshell dialog in the user's live home, gated on the boot marker).
+    # The helper and the rule are root-side and must be inside the factory
+    # snapshot - a snapshot runs the binaries and rules it contains.
+    restore_helper="$MNT/usr/local/bin/aelum-snapshot-restore"
+    check "state generator announces the snapshot boot for the prompt" \
+        grep -qF '/run/aelum-snapshot-boot' "$state_gen"
+    check "snapshot restore helper exists and is executable" [ -x "$restore_helper" ]
+    check "restore helper runs the rollback for the booted snapshot" \
+        grep -qF 'snapper --no-dbus -c root rollback' "$restore_helper"
+    check "restore helper refuses a boot that is not a snapshot" \
+        grep -qF '/run/aelum-snapshot-boot' "$restore_helper"
+    check "restore helper reboots without rolling back twice (the prompt's last button)" \
+        grep -qF -- '--reboot-only)' "$restore_helper"
+    check "the prompt's OK button can run the helper without a password" \
+        grep -qE '^%wheel ALL=\(ALL\) NOPASSWD: /usr/local/bin/aelum-snapshot-restore$' \
+            "$MNT/etc/sudoers.d/aelum-snapshot-restore"
+    check "the factory snapshot carries the restore helper" \
+        test -x "$factory/usr/local/bin/aelum-snapshot-restore"
+    check "the factory snapshot carries the passwordless rule" \
+        test -e "$factory/etc/sudoers.d/aelum-snapshot-restore"
+    # The prompt is system-side config, not per-user: /etc/xdg/quickshell is a
+    # Quickshell config directory for every user, and /etc/systemd/user is a unit
+    # load path of every user manager. The prompt therefore belongs to the system
+    # - a user created later, or recreated after deletion, has it too - and it is
+    # inside the root like the helper: a snapshot boots the prompt it contains.
+    prompt_qml="$MNT/etc/xdg/quickshell/aelum-snapshot/shell.qml"
+    prompt_unit="$MNT/etc/systemd/user/aelum-snapshot-prompt.service"
+    check "the snapshot prompt config is installed system-side" test -f "$prompt_qml"
+    check "the prompt runs the installed helper, not a copy of its logic" \
+        grep -qF '/usr/local/bin/aelum-snapshot-restore' "$prompt_qml"
+    check "the prompt offers CANCEL as well as OK" \
+        bash -c 'grep -qF "CANCEL" "$1" && grep -qF "OK" "$1"' _ "$prompt_qml"
+    check "the prompt unit exists" test -f "$prompt_unit"
+    check "the session target wants the prompt" \
+        test -e "$MNT/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"
+    check "the prompt runs only on a snapshot boot" \
+        grep -qF 'ConditionPathExists=/run/aelum-snapshot-boot' "$prompt_unit"
+    check "the prompt reads the snapshot number from the boot marker" \
+        grep -qF 'EnvironmentFile=/run/aelum-snapshot-boot' "$prompt_unit"
+    check "the factory snapshot carries the prompt" \
+        bash -c 'test -f "$1/etc/xdg/quickshell/aelum-snapshot/shell.qml" && test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service"' \
+            _ "$factory"
+
     # ── A transaction pair can actually be taken ───────────────────────────
     # Everything above asserts files. This runs the commands the hooks run, on the
     # installed system, and removes what it made. The failure it is looking for is the
@@ -673,6 +721,13 @@ else
         [ ! -e "$refind_dir/aelum/$install_id-snapshots.conf" ]
     check "no snapshot state mounts (ext4)" \
         [ ! -e "$MNT/usr/lib/systemd/system-generators/aelum-snapshot-state" ]
+    check "no snapshot restore helper (ext4)" \
+        [ ! -e "$MNT/usr/local/bin/aelum-snapshot-restore" ]
+    check "no restore sudoers rule (ext4)" \
+        [ ! -e "$MNT/etc/sudoers.d/aelum-snapshot-restore" ]
+    check "no snapshot prompt (ext4)" \
+        bash -c '[[ ! -e "$1/etc/xdg/quickshell/aelum-snapshot" && ! -e "$1/etc/systemd/user/aelum-snapshot-prompt.service" ]]' \
+            _ "$MNT"
 fi
 
 echo
