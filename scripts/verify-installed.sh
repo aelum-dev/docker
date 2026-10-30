@@ -696,6 +696,10 @@ if [ "$FILESYSTEM" = btrfs ]; then
         grep -qF 'ConditionPathExists=/run/aelum-snapshot-boot' "$prompt_unit"
     check "the prompt reads the snapshot number from the boot marker" \
         grep -qF 'EnvironmentFile=/run/aelum-snapshot-boot' "$prompt_unit"
+    # The prompt and dms.service are pulled in by the same wants link; the
+    # delay is what keeps the dialog from mapping over a still-empty desktop.
+    check "the prompt waits for the session to draw before asking" \
+        grep -qF 'ExecStartPre=/usr/bin/sleep 5' "$prompt_unit"
     check "the factory snapshot carries the prompt" \
         bash -c 'test -f "$1/etc/xdg/quickshell/aelum-snapshot/shell.qml" &&
                  test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service" &&
