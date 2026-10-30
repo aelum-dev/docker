@@ -124,11 +124,18 @@ fi
 # --- OVMF firmware (mirrors run.sh) ------------------------------------------
 OVMF_CODE=$(find /usr/share/edk2/x64 /usr/share/OVMF -name "OVMF_CODE*.fd" 2>/dev/null | grep -v secboot | head -1)
 [ -n "$OVMF_CODE" ] || fail "OVMF_CODE not found (install edk2-ovmf)"
-# Reset UEFI NVRAM from the system template before each boot so the boot records
-# start clean (same effect as manually deleting OVMF_VARS.fd to reset boot order).
-OVMF_VARS_SRC=$(find /usr/share/edk2/x64 /usr/share/OVMF -name "OVMF_VARS*.fd" 2>/dev/null | grep -v secboot | head -1)
-[ -n "$OVMF_VARS_SRC" ] || fail "OVMF_VARS source not found"
-cp "$OVMF_VARS_SRC" "$OVMF_VARS"
+# An auto run installs onto a freshly created disk, so its NVRAM starts clean
+# from the system template (same effect as manually deleting OVMF_VARS.fd).
+# A boot run must NOT reset it: MODE=boot itself, and everything that follows a
+# boot-mode VM (run-disk, snapshot-rollback), follows the firmware entries an
+# earlier install wrote — resetting here silently deletes them, and the next
+# disk boot fails with "BdsDxe: No bootable option or device was found".
+# (demo-snapshots is what (re)creates the Aelum entry; it deletes stale ones.)
+if [ "$MODE" = "auto" ]; then
+    OVMF_VARS_SRC=$(find /usr/share/edk2/x64 /usr/share/OVMF -name "OVMF_VARS*.fd" 2>/dev/null | grep -v secboot | head -1)
+    [ -n "$OVMF_VARS_SRC" ] || fail "OVMF_VARS source not found"
+    cp "$OVMF_VARS_SRC" "$OVMF_VARS"
+fi
 
 # --- SSH helpers -------------------------------------------------------------
 SSH_OPTS=(
@@ -316,7 +323,7 @@ log "installer CLI exited 0"
 # entry match the requested combination.
 if [ "$VERIFY" = "1" ]; then
     log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
-    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q DISK_PATH=%q\n' \
+    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q DISK_PATH=%q ENABLE_SSHD=1\n' \
              "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$LVM" "$DISK_PATH"
           cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
