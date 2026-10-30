@@ -657,7 +657,8 @@ if [ "$FILESYSTEM" = btrfs ]; then
                  grep -qF "<allow_active>no</allow_active>" "$1"' _ "$polkit_policy"
     check "the grant is scoped to the local active session of an admin" \
         bash -c 'grep -qF "polkit.addRule" "$1" && grep -qF "subject.local" "$1" &&
-                 grep -qF "subject.active" "$1" && grep -qF "polkit.user_is_admin" "$1"' _ "$polkit_rules"
+                 grep -qF "subject.active" "$1" && grep -qF "subject.isInGroup(\"wheel\")" "$1" &&
+                 ! grep -q "user_is_admin" "$1"' _ "$polkit_rules"
     check "the sudo mechanism is gone (no NOPASSWD drop-in for the helper)" \
         [ ! -e "$MNT/etc/sudoers.d/aelum-snapshot-restore" ]
     check "the factory snapshot carries the restore helper" \
