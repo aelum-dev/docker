@@ -11,6 +11,12 @@
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
 #   LVM         0 | 1          root (and ext4 home) live on LVM logical volumes
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
+#   ENABLE_SSHD 0 | 1          after a *passing* verification, enable
+#                              sshd.service in the target so follow-up
+#                              acceptance tests (test-snapshot-rollback.sh) can
+#                              reach the installed system over SSH. The product
+#                              does not enable sshd; this is test-fixture setup
+#                              done after every check, so no check sees it.
 #
 # The installed system is mounted read-only; every check is reported and the
 # script exits non-zero if any check fails.
@@ -658,7 +664,7 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "the grant is scoped to the local active session of an admin" \
         bash -c 'grep -qF "polkit.addRule" "$1" && grep -qF "subject.local" "$1" &&
                  grep -qF "subject.active" "$1" && grep -qF "subject.isInGroup(\"wheel\")" "$1" &&
-                 ! grep -q "user_is_admin" "$1"' _ "$polkit_rules"
+                 ! grep -v "^//" "$1" | grep -q "user_is_admin"' _ "$polkit_rules"
     check "the sudo mechanism is gone (no NOPASSWD drop-in for the helper)" \
         [ ! -e "$MNT/etc/sudoers.d/aelum-snapshot-restore" ]
     check "the factory snapshot carries the restore helper" \
@@ -673,21 +679,23 @@ if [ "$FILESYSTEM" = btrfs ]; then
     # inside the root like the helper: a snapshot boots the prompt it contains.
     prompt_qml="$MNT/etc/xdg/quickshell/aelum-snapshot/shell.qml"
     prompt_unit="$MNT/etc/systemd/user/aelum-snapshot-prompt.service"
+    prompt_i18n="$MNT/etc/xdg/quickshell/aelum-snapshot/i18n"
     check "the snapshot prompt config is installed system-side" test -f "$prompt_qml"
     check "the prompt runs the installed helper, not a copy of its logic" \
         grep -qF '/usr/local/bin/aelum-snapshot-restore' "$prompt_qml"
-    check "the prompt offers CANCEL as well as OK" \
-        bash -c 'grep -qF "CANCEL" "$1" && grep -qF "OK" "$1"' _ "$prompt_qml"
+    # Every string the dialog shows is looked up in the translated namespace: a
+    # literal button label in the config is a string no locale could change.
+    check "the prompt reads its copy from the translated namespace" \
+        bash -c 'grep -qF "snapshot.prompt." "$1" && grep -qF "tr(\"cancel\")" "$1" &&
+                 grep -qF "tr(\"ok\")" "$1" && grep -qF "tr(\"reboot\")" "$1"' _ "$prompt_qml"
     check "the prompt unit exists" test -f "$prompt_unit"
     # The pull-in is per-home on purpose: the wants link is seeded into every
     # real home by /etc/skel (the same way dms.service is started), and there
     # must be no system-side link - the greeter runs a Hyprland session too
     # (dms-greeter --command hyprland), is not in wheel, and did not choose a
     # snapshot, so it must not be asked. Its home is never seeded from skel.
-    # The link is asserted with -L, not -e: its target is an absolute path,
-    # and in a mounted (not booted) tree that resolves against the live ISO,
-    # where the unit does not exist. The link resolving is what the booted
-    # system's own session does, and test-snapshot-rollback.sh asserts it there.
+    # The link is asserted with -L, not -e: it is a symlink either way, and -e
+    # would also follow it into a target that only exists once the system boots.
     check "the prompt is pulled in by the seeded home, not by the system" \
         bash -c 'test -L "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" &&
                  [ ! -L "$1/etc/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service" ] &&
@@ -705,6 +713,61 @@ if [ "$FILESYSTEM" = btrfs ]; then
                  test -f "$1/etc/systemd/user/aelum-snapshot-prompt.service" &&
                  test -L "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-snapshot-prompt.service"' \
             _ "$factory"
+
+    # ── The restore path is the one the live ISO ships ───────────────────────
+    # The helper, its polkit action and grant, the dialog, its translated copy and
+    # its unit are source in this live ISO and the installer copies them unchanged.
+    # That is why the checks here compare bytes: the installer no longer holds their
+    # text, so a copy that renamed, truncated or re-modelled one of them would be
+    # invisible until a snapshot boot failed. The live ISO is right here, so the
+    # comparison needs no fixture.
+    for shipped in /usr/local/bin/aelum-snapshot-restore \
+                   /usr/share/polkit-1/actions/dev.aelum.snapshot.restore.policy \
+                   /etc/polkit-1/rules.d/aelum-snapshot-restore.rules \
+                   /etc/systemd/user/aelum-snapshot-prompt.service; do
+        check "the installed $shipped is the file the live ISO ships" cmp -s "$shipped" "$MNT$shipped"
+    done
+    check "the installed prompt config is the one the live ISO ships" \
+        diff -r /etc/xdg/quickshell/aelum-snapshot "$MNT/etc/xdg/quickshell/aelum-snapshot"
+    # Copied with its mode: pkexec authenticates the program an action execs
+    # (root-owned, not group- or world-writable), and mkarchiso only applies the
+    # modes profiledef.sh declares. This is where a missing declaration shows up.
+    check "the copied helper keeps a mode pkexec accepts" \
+        bash -c 'test -x "$1" && [ $(( 0$(stat -c "%a" "$1") & 022 )) -eq 0 ]' _ "$MNT/usr/local/bin/aelum-snapshot-restore"
+
+    # ── The prompt asks in the languages the installer speaks ─────────────────
+    # The translated copy is generated out of the installer's UI translations into
+    # the live ISO (installer/backend/scripts/gen-snapshot-prompt-i18n.go) and read
+    # at run time, so the language follows the system's, not the installer's. What
+    # has to hold on disk: an English fallback, the same key set in every locale,
+    # the same placeholders, and the language this system was installed with among
+    # the files.
+    check "the prompt carries translated copy" test -d "$prompt_i18n"
+    check "the prompt has an English fallback" test -f "$prompt_i18n/en-US.json"
+    copy_keys() { grep -c '"snapshot\.prompt\.' "$1"; }
+    copy_placeholders() { grep -o '{[a-z][a-zA-Z]*}' "$1" | sort | md5sum | cut -d' ' -f1; }
+    english_keys="$(copy_keys "$prompt_i18n/en-US.json")"
+    english_placeholders="$(copy_placeholders "$prompt_i18n/en-US.json")"
+    locale_count=0
+    for locale_file in "$prompt_i18n"/*.json; do
+        code="$(basename "$locale_file" .json)"
+        locale_count=$((locale_count + 1))
+        check "$code carries the prompt's copy" \
+            bash -c '[ "$1" = "$2" ]' _ "$(copy_keys "$locale_file")" "$english_keys"
+        check "$code keeps the prompt's placeholders" \
+            bash -c '[ "$1" = "$2" ]' _ "$(copy_placeholders "$locale_file")" "$english_placeholders"
+    done
+    echo "  note - the prompt can ask in $locale_count language(s)"
+    # A floor, not an equality: the authoritative "exactly the languages the
+    # installer speaks" comparison is the installer's own test, which compares this
+    # directory against its UI translations. Here the point is catching a copy that
+    # landed half the generated set.
+    check "the prompt's copy covers every shipped language" \
+        bash -c '[ "$1" -ge 28 ]' _ "$locale_count"
+    installed_lang="$(grep -m1 '^LANG=' "$MNT/etc/locale.conf" 2>/dev/null | cut -d= -f2- | tr -d '"')"
+    installed_code="$(printf '%s' "$installed_lang" | sed -e 's/@.*//' -e 's/\.[Uu][Tt][Ff].*//' -e 's/_/-/')"
+    check "the language this system was installed with is one the prompt can ask in" \
+        test -f "$prompt_i18n/$installed_code.json"
 
     # ── A transaction pair can actually be taken ───────────────────────────
     # Everything above asserts files. This runs the commands the hooks run, on the
@@ -766,6 +829,22 @@ fi
 
 echo
 if [ "$fails" -eq 0 ]; then
+    # Test-fixture step, not a product claim: the product does not enable sshd,
+    # but the snapshot-rollback acceptance test reaches the installed system over
+    # SSH the way a user would, and that needs a listener on the *first* boot.
+    # Doing this here, after every check has run, reuses this script's LUKS/LVM
+    # mount instead of repeating that math in another script; no check ever
+    # observes the change. Enabled via ENABLE_SSHD=1 from test-install.sh.
+    if [ "${ENABLE_SSHD:-0}" = 1 ]; then
+        if mount -o remount,rw "$MNT" 2>/dev/null &&
+           mkdir -p "$MNT/etc/systemd/system/multi-user.target.wants" &&
+           ln -sfn /usr/lib/systemd/system/sshd.service \
+               "$MNT/etc/systemd/system/multi-user.target.wants/sshd.service"; then
+            echo "  fixture - sshd enabled on the test disk (for follow-up acceptance tests)"
+        else
+            echo "  note - could not enable sshd on the test disk"
+        fi
+    fi
     echo "VERIFY: PASS (fs=$FILESYSTEM luks=$LUKS lvm=$LVM)"
     exit 0
 fi

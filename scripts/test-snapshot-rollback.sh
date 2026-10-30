@@ -40,8 +40,12 @@
 #
 # The installed system is reached over SSH as the install's own user (the test
 # account, in wheel), because that is how a user would reach a recovery entry.
-# sshd is not part of the installer's package set; openssh ships as a dependency
-# of the desktop set, so this enables the unit rather than installing anything.
+# sshd is not enabled by the product; test-install.sh enables it on the test
+# disk as a fixture after a passing verification (verify-installed.sh
+# ENABLE_SSHD=1), so a disk from `make test-one` is reachable on its first
+# boot. The enable below is the fallback for a disk that predates that fixture
+# — it can only run once SSH is already up, which is why the fixture is what
+# makes a fresh disk work at all.
 
 set -uo pipefail
 
@@ -155,17 +159,34 @@ check "the install's own menu entry exists" test -n "$install_entry"
 
 # ── 2. a state the snapshot will not have ────────────────────────────────────
 step "take a snapshot, then change the live system"
-snapshot="$(as_root "snapper -c root create -t single -d 'rollback acceptance test' -c number -u important=yes" | tr -dc '0-9')"
-if [ -z "$snapshot" ]; then
-    # snapper prints the number it made; if it did not, read it back off the tree.
-    snapshot="$(as_root 'ls -1 /.snapshots | grep -E "^[0-9]+$" | sort -n | tail -1')"
+# The menu entry boots the newest *pre* snapshot before anything else — that is
+# the kind of state a pacman transaction creates (90-…-pre.hook / 91-…-post.hook)
+# and the state worth returning to when a change breaks the system. A plain
+# single, however recent or however important, ranks below a pre by design. So
+# the test creates what the hooks create — pre, the change, post — and expects
+# the menu to offer the pre.
+#
+# A marker left over from an earlier run is part of the state the pre snapshot
+# takes, and then the restored system legitimately has it and the last check
+# fails for the wrong reason. Remove any old one first: the marker must be in
+# the live system only, never in the snapshot.
+as_root "rm -f $MARKER" >/dev/null
+pre="$(as_root "snapper -c root create -t pre -p -c number -d 'rollback acceptance test'" | tail -1 | tr -dc '0-9')"
+if [ -z "$pre" ]; then
+    bad "could not take the pre snapshot"
 fi
+snapshot="$pre"
 [ -n "${SNAPSHOT:-}" ] && snapshot="$SNAPSHOT"
 echo "  snapshot: ${snapshot:-none}"
 check "a snapshot of the current system was taken" bash -c '[[ "$1" =~ ^[0-9]+$ ]]' _ "$snapshot"
 
 as_root "printf 'written after the snapshot\n' > $MARKER && sync"
 check "the live system now has something the snapshot does not" as_root "test -f $MARKER"
+
+# The post half closes the pair exactly as a pacman transaction would: it is the
+# state that *contains* the change, and the entry must never boot it.
+post="$(as_root "snapper -c root create -t post --pre-number $pre -p -c number -d 'rollback acceptance test'" | tail -1 | tr -dc '0-9')"
+[ -n "$post" ] || note "the post half was not created; the menu boots the pre either way"
 
 # The menu is what a user boots, so the installed system's own generator writes
 # it; this test only reads the entry it produced.
@@ -216,6 +237,24 @@ check "the snapshot boot announced itself with this snapshot's number" \
     bash -c '[[ "$1" == "SNAPSHOT=$2" ]]' _ "$marker" "$snapshot"
 check "the restore prompt is installed system-side" \
     as_root "test -f /etc/xdg/quickshell/aelum-snapshot/shell.qml"
+# The unit is the other half of the prompt and it is a shipped file: the live ISO
+# carries it and the installer copied it here unchanged. Only a graphical session can
+# start it, so what this session can assert is that it exists, is gated on the marker
+# this boot wrote, and reads its copy from the translated namespace.
+check "the prompt unit is installed and gated on this boot" \
+    as_root 'test -f /etc/systemd/user/aelum-snapshot-prompt.service &&
+             grep -qF "ConditionPathExists=/run/aelum-snapshot-boot" /etc/systemd/user/aelum-snapshot-prompt.service'
+# The words are the system's language, resolved when the dialog runs. The file for
+# the locale this system was installed with has to be in the tree this snapshot
+# carries, or the question would come up in English whatever the locale says.
+system_lang="$(as_root 'grep -m1 "^LANG=" /etc/locale.conf | cut -d= -f2-' | tr -d '"')"
+lang_code="$(printf '%s' "$system_lang" | sed -e 's/@.*//' -e 's/\.[Uu][Tt][Ff].*//' -e 's/_/-/')"
+echo "  this system's language: ${system_lang:-none} -> ${lang_code:-none}"
+check "the prompt has the copy for this system's language" \
+    as_root "test -f /etc/xdg/quickshell/aelum-snapshot/i18n/$lang_code.json"
+check "the prompt reads its copy from the translated namespace" \
+    as_root 'grep -qF "snapshot.prompt." /etc/xdg/quickshell/aelum-snapshot/shell.qml &&
+             grep -qF "LayoutMirroring.enabled" /etc/xdg/quickshell/aelum-snapshot/shell.qml'
 # The pull-in is the home's wants link (seeded by /etc/skel), not a
 # system-side one: this booted user's session is what starts the prompt unit,
 # and the greeter - which must not be asked - has no such link.

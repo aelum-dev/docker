@@ -446,11 +446,12 @@ lists while iterating.
 ### Looking at the snapshot boot menu
 
 A btrfs install keeps snapper snapshots and offers them in rEFInd as one entry
-with the snapshots inside it. Five scripts cover that, from cheapest to real:
+with the snapshots inside it. Six scripts cover that, from cheapest to real:
 
 ```bash
 ./scripts/fake-snapshot-menu.sh        # the menu generator against a fixture: no disk, no root
 ./scripts/fake-snapshot-state.sh       # the snapshot-boot state generator, same kind of fixture
+./scripts/fake-snapshot-restore.sh     # the shipped restore helper (live-iso source) against stubs
 ./scripts/menu-shots.sh                # screenshots of the real menu, no QEMU window
 make demo-snapshots RESET=1            # five demo snapshots on the test disk
 make snapshot-rollback                 # boot a snapshot -> snapper rollback -> reboot -> assert
@@ -479,6 +480,20 @@ expects, ordered before `local-fs.target` and `systemd-logind.service`. A root
 with no subvolume id → nothing. It also calls the generator the way systemd does
 (the unit directory plus the two extra directories systemd passes), because a
 generator that only works when a test calls it correctly fails every real boot.
+
+**`fake-snapshot-restore.sh`** runs the third piece — but this one is not the
+installer's: the restore helper is source in the live ISO
+(`live-iso/airootfs/usr/local/bin/aelum-snapshot-restore`) and the installer
+copies it unchanged, so this is the only place its *behaviour* is checked without
+a disk. `snapper`, `systemctl` and `id` are stubbed on PATH and record their
+argv; what is asserted is the two wrong answers a real install would pay for:
+an ordinary boot (no `/run/aelum-snapshot-boot`) is refused without touching
+snapper — `snapper rollback` with no number means "the state I am booted in" —
+and `--reboot-only` (the prompt's REBOOT button) reboots without a second
+rollback and its second undo snapshot. It also checks the helper's file mode,
+because `pkexec` refuses to exec a program that is group- or world-writable and
+`mkarchiso` only applies the modes `profiledef.sh` declares. `HELPER=` points it
+at another copy if needed.
 
 **`test-snapshot-rollback.sh`** is the acceptance test, and the only one of these
 that runs a whole feature rather than a generator: it boots what is installed on
@@ -544,6 +559,7 @@ Two things about a real menu, both learned the hard way:
 │   ├── extract-snapshot-generator.sh  # write out the boot-menu generator from the installer source
 │   ├── fake-snapshot-menu.sh  # run that generator against a fixture (no disk, no root)
 │   ├── fake-snapshot-state.sh # run the snapshot-boot state generator against a fixture
+│   ├── fake-snapshot-restore.sh  # run the shipped restore helper (live-iso source) against stubs
 │   ├── test-snapshot-rollback.sh  # boot a snapshot -> snapper rollback -> reboot -> assert
 │   ├── release.sh             # entry point: load secrets, sign, upload, update site
 │   ├── sign-iso.sh            # sign + checksum the ISO (GPG) for release
