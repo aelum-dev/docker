@@ -226,15 +226,29 @@ check "the greeter is reached, not a text login" as_root 'systemctl is-active gr
 check "the network is up (this session is over it)" as_root 'true'
 
 # What the desktop prompt is built from: the generator announced this boot and
-# named the snapshot, and the prompt's unit + config are installed system-side
-# (/etc/xdg/quickshell + /etc/systemd/user), so they belong to the system and
-# not to any one account - and they are inside the very snapshot being booted.
-# The unit itself is only observable in a graphical session; the marker and the
-# files are the parts this test can assert, and the next step drives the exact
-# command the OK button runs.
+# named the snapshot, and the menu generator (aelum-refind-snapshots, enabled at
+# boot) adds that snapshot's own menu words - phrase and date - to the same
+# marker, so the prompt asks with the words the menu titled it with. The prompt's
+# unit + config are installed system-side (/etc/xdg/quickshell + /etc/systemd/user),
+# so they belong to the system and not to any one account - and they are inside
+# the very snapshot being booted. The unit itself is only observable in a
+# graphical session; the marker and the files are the parts this test can assert,
+# and the next step drives the exact command the OK button runs.
 marker="$(as_root 'cat /run/aelum-snapshot-boot 2>/dev/null')"
 check "the snapshot boot announced itself with this snapshot's number" \
-    bash -c '[[ "$1" == "SNAPSHOT=$2" ]]' _ "$marker" "$snapshot"
+    bash -c 'grep -qxF "SNAPSHOT=$2" <<<"$1"' _ "$marker" "$snapshot"
+# The enrichment comes from the menu generator's boot service; give it a moment,
+# then hold the prompt to the words the menu used - the description this test
+# gave the snapshot, and its date.
+for _ in 1 2 3 4 5 6; do
+    grep -q '^SNAPSHOT_PHRASE=' <<<"$marker" && break
+    sleep 5
+    marker="$(as_root 'cat /run/aelum-snapshot-boot 2>/dev/null')"
+done
+check "the marker carries the menu's phrase for the booted snapshot" \
+    bash -c 'grep -qF "SNAPSHOT_PHRASE=\"rollback acceptance test\"" <<<"$1"' _ "$marker"
+check "the marker carries the snapshot's date in the menu's shape" \
+    bash -c 'grep -qE "^SNAPSHOT_DATE=\"[0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}\"" <<<"$1"' _ "$marker"
 check "the restore prompt is installed system-side" \
     as_root "test -f /etc/xdg/quickshell/aelum-snapshot/shell.qml"
 # The unit is the other half of the prompt and it is a shipped file: the live ISO
