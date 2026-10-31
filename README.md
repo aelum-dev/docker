@@ -69,5 +69,4 @@ the scripts are laid out, and the QEMU / OVMF facts that look optional until the
 
 ## License
 
-This repo ships no license: it is build and test tooling for the distro, which is GPL-3.0 in
-`installer/`, `live-iso/` and `website/`.
+GPL-3.0 — see [LICENSE](./LICENSE).
