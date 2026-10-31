@@ -13,7 +13,7 @@
 #
 # The five are a realistic history, not a label demo: two pre/post pairs from a
 # package transaction, and one snapshot a person named. The menu names every one
-# of them by number and date (words short enough for rEFInd to draw at any
+# of them by number, date and type (words short enough for rEFInd to draw at any
 # screen width); their descriptions reach the person through the restore prompt.
 # Each pair changes a file in between, so it is a real pair and not one that
 # EMPTY_PRE_POST_CLEANUP would drop.

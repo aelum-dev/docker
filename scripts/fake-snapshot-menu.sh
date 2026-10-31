@@ -155,7 +155,7 @@ info() { # num type date description [cleanup] [important]
 # outside ASCII, #8 has one containing the generator's own field separator, #10
 # says nothing at all. #11 is a directory that is not a snapshot. The
 # descriptions of #6 and #8 test the other direction too: no description reaches
-# the menu fragment at all - titles are number and date.
+# the menu fragment at all - titles are number, date and type.
 reset_snapshots() {
     rm -rf "$SNAPS"
     mkdir -p "$SNAPS/11"
@@ -197,15 +197,15 @@ want_count 7 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count"
 [ "$(entry_target)" = 4 ] && ok "the entry boots the newest snapshot taken before a change (got $(entry_target))" ||
     bad "entry target is $(entry_target), want 4"
 check "a pre snapshot is booted by the entry" grep -q '# snapshot 4 pre' "$FRAGMENT"
-check "titles name the snapshot by number and date" grep -qE 'submenuentry "Snapshot 4 - 27 Oct 2026 11:00"' "$FRAGMENT"
-check "the date survives being named" grep -qE '27 Oct 2026 11:00' "$FRAGMENT"
+check "titles name the snapshot by number, date and type" grep -qE 'submenuentry "Snapshot 4 - 10/27/26 11:00 AM - pre"' "$FRAGMENT"
+check "the date survives being named" grep -qE '10/27/26 11:00 AM' "$FRAGMENT"
 absent "no description reaches the menu fragment" \
     'first root filesystem|pacman|GPU driver|rentr|before after' "$FRAGMENT"
 check "a description outside ASCII leaves nothing in the fragment" \
-    grep -qE 'submenuentry "Snapshot 6 - 27 Oct 2026 12:00"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 6 - 10/27/26 12:00 PM - single"' "$FRAGMENT"
 absent "no bytes rEFInd's font cannot draw anywhere in the fragment" '[^ -~]' "$FRAGMENT"
 check "a snapshot with no description is still named and dated" \
-    grep -qE 'submenuentry "Snapshot 10 - 28 Oct 2026 01:00"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 10 - 10/28/26 1:00 AM - single"' "$FRAGMENT"
 absent "a directory that is not a snapshot is not listed" 'Snapshot 11|Snapshot notes' "$FRAGMENT"
 check "only the root subvolume is swapped for the snapshot" \
     grep -q 'options "root=UUID=3f5b5703-93af-49ca-8fbb-9d93703a72c8 rw quiet quiet loglevel=3 rootflags=subvol=@/.snapshots/4/snapshot"' "$FRAGMENT"
@@ -216,7 +216,7 @@ absent "the entry this install boots is never rewritten by the generator" 'menue
 # shift everything after it. Descriptions no longer reach the list at all, so
 # the title keeps its date and the pipe text stays out of the fragment.
 check "a description containing the field separator keeps its title and its date" \
-    grep -qE 'submenuentry "Snapshot 8 - 27 Oct 2026 13:00"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 8 - 10/27/26 1:00 PM - single"' "$FRAGMENT"
 
 echo "== the snapshot that is the system is not offered =="
 # #1 is the default subvolume: this install's own entry boots it (it names no
@@ -281,7 +281,7 @@ code=$(run_path "$FAKE/bin-plain:$BIN:$PATH")
 want_count 8 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count when the default is a plain subvolume"
 check "the history is still named from the default subvolume" \
     grep -q 'rootflags=subvol=@/\.snapshots/' "$FRAGMENT"
-check "the old system snapshot is offered again" grep -qE 'submenuentry "Snapshot 1 - 27 Oct 2026 00:21"' "$FRAGMENT"
+check "the old system snapshot is offered again" grep -qE 'submenuentry "Snapshot 1 - 10/27/26 12:21 AM - single"' "$FRAGMENT"
 reset_snapshots
 code=$(run)
 
@@ -319,7 +319,7 @@ code=$(run)
 [ "$(entry_target)" = 4 ] && ok "the newest timeline snapshot did not take the entry (target $(entry_target))" ||
     bad "entry target is $(entry_target), want 4 (the newest pre snapshot)"
 check "the timeline snapshot is still listed in the submenu" \
-    grep -qE 'submenuentry "Snapshot 20 - 29 Oct 2026 03:00"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 20 - 10/29/26 3:00 AM - single"' "$FRAGMENT"
 
 echo "== the states worth keeping are not crowded out =="
 # A dozen timeline snapshots is what snapper keeps, and a plain newest-N list is
@@ -331,9 +331,9 @@ code=$(run)
 [ "$(entry_target)" = 4 ] && ok "ten newer timeline snapshots did not take the entry (target $(entry_target))" ||
     bad "entry target is $(entry_target), want 4"
 check "the pre snapshot is still listed after a dozen timestamps" \
-    grep -qE 'submenuentry "Snapshot 4 - 27 Oct 2026 11:00"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 4 - 10/27/26 11:00 AM - pre"' "$FRAGMENT"
 check "the post snapshot is still listed too" \
-    grep -qE 'submenuentry "Snapshot 5 - 27 Oct 2026 11:04"' "$FRAGMENT"
+    grep -qE 'submenuentry "Snapshot 5 - 10/27/26 11:04 AM - post"' "$FRAGMENT"
 want_count 8 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count (the bounded list stays bounded)"
 
 echo "== with no pre snapshot the entry is the important one =="
@@ -348,7 +348,7 @@ code=$(run)
 [ "$(entry_target)" = 7 ] && ok "the entry is the snapshot marked important (target $(entry_target))" ||
     bad "entry target is $(entry_target), want 7 (the newest important snapshot)"
 check "the entry is titled with the state it boots" \
-    grep -q 'menuentry "Aelum snapshot 7 - 27 Oct 2026 14:00"' "$FRAGMENT"
+    grep -q 'menuentry "Aelum snapshot 7 - 10/27/26 2:00 PM - single"' "$FRAGMENT"
 absent "the newer timeline snapshot is not the entry" 'menuentry "Aelum snapshot 21' "$FRAGMENT"
 reset_snapshots
 
