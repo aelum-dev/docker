@@ -126,15 +126,27 @@ OVMF_CODE=$(find /usr/share/edk2/x64 /usr/share/OVMF -name "OVMF_CODE*.fd" 2>/de
 [ -n "$OVMF_CODE" ] || fail "OVMF_CODE not found (install edk2-ovmf)"
 # An auto run installs onto a freshly created disk, so its NVRAM starts clean
 # from the system template (same effect as manually deleting OVMF_VARS.fd).
-# A boot run must NOT reset it: MODE=boot itself, and everything that follows a
-# boot-mode VM (run-disk, snapshot-rollback), follows the firmware entries an
-# earlier install wrote — resetting here silently deletes them, and the next
+# A boot run must NOT reset it: demo-snapshots writes the install's firmware
+# entry through the live ISO, and run-disk / snapshot-rollback follow the entries
+# an earlier install wrote — resetting here silently deletes them, and the next
 # disk boot fails with "BdsDxe: No bootable option or device was found".
-# (demo-snapshots is what (re)creates the Aelum entry; it deletes stale ones.)
 if [ "$MODE" = "auto" ]; then
     OVMF_VARS_SRC=$(find /usr/share/edk2/x64 /usr/share/OVMF -name "OVMF_VARS*.fd" 2>/dev/null | grep -v secboot | head -1)
     [ -n "$OVMF_VARS_SRC" ] || fail "OVMF_VARS source not found"
     cp "$OVMF_VARS_SRC" "$OVMF_VARS"
+else
+    # ...but a preserved NVRAM also carries its BootOrder, and while that variable
+    # exists OVMF boots strictly from it and ignores QEMU's -boot d: a boot run
+    # then boots whatever the last install put first — the installed disk, not the
+    # ISO — and sits there if that entry no longer leads anywhere. Dropping
+    # BootOrder does not help: the order OVMF rebuilds puts the persisted OS
+    # entries ahead of QEMU's CD. So put the ISO's own entry at the head instead:
+    # BootOrder's data is rewritten in place, every Boot#### entry (the Aelum one
+    # included) stays byte-identical for the disk runs that follow, and OVMF
+    # boots from the edited order.
+    log "Promoting the ISO's DVD entry in BootOrder so this run boots the ISO, not the installed disk ..."
+    python3 "$PROFILE_DIR/scripts/uefi-vars.py" "$OVMF_VARS" promote "QEMU DVD-ROM" \
+        || log "WARN: could not promote the ISO entry in $OVMF_VARS; the VM may boot the installed disk (make run-clean resets the NVRAM)"
 fi
 
 # --- SSH helpers -------------------------------------------------------------

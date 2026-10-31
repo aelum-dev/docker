@@ -532,9 +532,15 @@ Two things about a real menu, both learned the hard way:
   `/mnt/efi` and runs it from the live ISO. A menu written by an **older**
   installer is still one boot behind that installer: run `menu-shots.sh
   --then-boot` once, and the screenshots after that are current.
-- `test-install.sh` recreates `OVMF_VARS.fd` on every run, so after a
-  `test-boot` the firmware has no `Aelum` entry. `make demo-snapshots` deletes
-  stale entries and creates a fresh one; a stale entry pointing at a disk that
+- `test-install.sh` resets `OVMF_VARS.fd` on **auto** runs only; a `test-boot` keeps
+  the entries an install wrote so `run-disk` and `snapshot-rollback` can follow them.
+  Before an ISO boot it instead promotes the ISO's own firmware entry to the head of
+  `BootOrder` (`scripts/uefi-vars.py promote "QEMU DVD-ROM"`): while that variable
+  exists OVMF boots strictly from it and ignores QEMU's `-boot d`, and the order it
+  rebuilds when `BootOrder` is missing puts a persisted install entry ahead of the CD
+  — a boot run would otherwise boot the installed disk instead of the ISO and hang
+  there. `make demo-snapshots` deletes
+  stale entries and creates a fresh `Aelum` one; a stale entry pointing at a disk that
   has since been recreated fails with `BdsDxe: … Not Found`, and the menu never
   appears at all.
 
