@@ -8,8 +8,8 @@ ever baking your secrets into the code.
 ```
                  (your PC / any VM)
 ┌───────────────────────────────────────────────────────────────────┐
-│  make build          → output/*.iso   (ISO is huge; stays local)    │
-│  make release        → sign → upload to R2 → update website links   │
+│  make build          → output/*.iso   (ISO is huge; stays local)  │
+│  make release        → sign → upload to R2 → update website links │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
