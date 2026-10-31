@@ -518,7 +518,7 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "snapper plugin exists and is executable" [ -x "$plugin" ]
     # Not only create and delete: a transactional rollback changes the default
     # subvolume and creates no snapshot, and snapper modify rewrites the description
-    # and important= marking a menu title is built from.
+    # and important= marking the menu ranks by.
     check "snapper plugin reacts to every change the menu shows" \
         grep -qF 'create-snapshot-post|delete-snapshot-post|set-default-snapshot-post|modify-snapshot-post|set-read-only-post' "$plugin"
     check "snapper plugin only follows the root config" grep -qF '[ "$2" = "/" ]' "$plugin"
@@ -532,8 +532,16 @@ if [ "$FILESYSTEM" = btrfs ]; then
     check "rEFInd snapshot menu fragment exists" [ -f "$snapshot_entry" ]
     check "the menu is written before this install's first boot" \
         grep -Eq '^[[:space:]]*menuentry ' "$snapshot_entry"
+    # The factory snapshot is the state "restore to what the installer produced"
+    # goes back to, so it has to be in the menu. Titles carry no descriptions
+    # (rEFInd truncates text it cannot fit), so the listing is asserted by the
+    # snapshot number - the generator names one in a "# snapshot <n>" comment
+    # above every entry and submenu entry it writes.
+    factory_number=""
+    factory_info="$(grep -l 'after installation' "$MNT/.snapshots"/[0-9]*/info.xml 2>/dev/null | head -1)"
+    [ -n "$factory_info" ] && factory_number="$(basename "$(dirname "$factory_info")")"
     check "the menu offers the state this installer produced" \
-        grep -q 'after installation' "$snapshot_entry"
+        bash -c 'grep -qF "# snapshot $2 " "$1"' _ "$snapshot_entry" "$factory_number"
     # Every snapshot entry has to name a subvolume that is really in the filesystem
     # tree. A history path derived from the wrong root (".snapshots/2/snapshot"
     # instead of "@/.snapshots/2/snapshot") reads fine, is listed in the menu, and

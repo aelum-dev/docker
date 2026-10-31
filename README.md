@@ -464,9 +464,9 @@ asserts what the fragment must look like: one `menuentry`, every snapshot as a
 `submenuentry`, the newest *pre* snapshot as the one the entry boots (else the
 newest `important=yes` one, and never a `timeline` snapshot), the states worth
 keeping still listed after a dozen timeline snapshots, the snapshot that *is* the
-system not offered at all, a pacman pair labelled by what it is, a person's
-description shown verbatim, dates kept, nothing outside rEFInd's ASCII font, the
-same output twice, no entry at all when there are no snapshots, and a failure
+system not offered at all, every title the number and the date and nothing else
+(no description reaches the fragment, and nothing outside rEFInd's ASCII font
+appears in it), the same output twice, no entry at all when there are no snapshots, and a failure
 when the ESP is not mounted. It is a host check: it says out loud that it does
 not touch the real mount table.
 

@@ -11,11 +11,12 @@
 #   demo-snapshots.sh --root /mnt    # in the live ISO, with the install mounted at /mnt
 #   demo-snapshots.sh --reset        # delete every snapshot first
 #
-# The five are chosen to cover the three things the menu labels differently: two
-# pre/post pairs from a package transaction ("Before system update" / "After
-# system update"), and one snapshot a person named, which the menu shows with
-# those words. Each pair changes a file in between, so it is a real pair and not
-# one that EMPTY_PRE_POST_CLEANUP would drop.
+# The five are a realistic history, not a label demo: two pre/post pairs from a
+# package transaction, and one snapshot a person named. The menu names every one
+# of them by number and date (words short enough for rEFInd to draw at any
+# screen width); their descriptions reach the person through the restore prompt.
+# Each pair changes a file in between, so it is a real pair and not one that
+# EMPTY_PRE_POST_CLEANUP would drop.
 #
 # The boot menu is written by the installed system: aelum-refind-snapshots.service
 # runs at every boot and snapper's plugin starts it after every snapshot. With
