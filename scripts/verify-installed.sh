@@ -290,6 +290,81 @@ check "resolver is a link into /run, not a file inside the root" \
 check "the resolver link points at NetworkManager's runtime resolv.conf" \
     bash -c '[ "$(readlink "$1/etc/resolv.conf")" = "/run/NetworkManager/resolv.conf" ]' _ "$MNT"
 
+# ── The colors a session starts with ──────────────────────────────────────────
+# Nothing in the installed system puts a palette into GTK until Dux Shell has
+# applied a theme, so the state the seeded home and the copied dconf keyfiles
+# leave behind is what an app that starts before that sees. A GTK3 app (Firefox)
+# reads ~/.config/gtk-3.0/gtk.css, which has to lead to the palette, and the
+# palette has to be the mode the seeded session is in: a light palette under a
+# dark session is what made a first-start Firefox render plain Adwaita until the
+# mode was switched.
+seeded_mode() { sed -n 's/.*"mode": *"\([a-z]*\)".*/\1/p' "$1" | head -1; }
+# json_value "<file>" "<key>": the string a top-level key holds. The seeded Dux
+# Shell files are the only JSON these checks read, and only for one flat key.
+json_value() { sed -n 's/.*"'"$2"'": *"\([^"]*\)".*/\1/p' "$1" | head -1; }
+ini_value() { sed -n 's/^'"$2"'=//p' "$1" | head -1; }
+dconf_value() { sed -n 's/^'"$2"'='"'"'\(.*\)'"'"'.*/\1/p' "$1" | head -1; }
+# palette_is_mode "<dank-colors.css>" <dark|light> — window_bg_color's luminance is
+# the only colour that says which variant a generated sheet is, and every generated
+# sheet defines it.
+palette_is_mode() {
+    awk -v mode="$2" '
+        !seen && /@define-color window_bg_color/ {
+            seen = 1
+            r = strtonum("0x" substr($3, 2, 2)); g = strtonum("0x" substr($3, 4, 2)); b = strtonum("0x" substr($3, 6, 2))
+            lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+            dark = mode == "dark"
+            good = (dark && lum < 0.5) || (!dark && lum > 0.5)
+        }
+        END { if (!seen || !good) exit 1 }' "$1"
+}
+# imports_exist "<gtk.css>" — every @import in the sheet names a file next to it.
+# A sheet that imports a file nothing writes is dead config plus a parser error on
+# every app start.
+imports_exist() {
+    local dir target missing=0
+    dir="$(dirname "$1")"
+    while IFS= read -r target; do
+        test -e "$dir/$target" || missing=1
+    done < <(grep -o '@import[^;]*' "$1" | tr "'" '"' | sed -n 's/.*"\([^"]*\)".*/\1/p')
+    return "$missing"
+}
+
+seed_mode="$(seeded_mode "$MNT/etc/skel/.cache/dms/dms-colors.json")"
+check "the seeded session declares a mode" test -n "$seed_mode"
+for gtk in gtk-3.0 gtk-4.0; do
+    check "the seeded $gtk palette is the palette of the seeded mode" \
+        palette_is_mode "$MNT/etc/skel/.config/$gtk/dank-colors.css" "$seed_mode"
+    check "every @import in the seeded $gtk sheet names a file that exists" \
+        imports_exist "$MNT/etc/skel/.config/$gtk/gtk.css"
+done
+# The link is the whole GTK3 half of the chain: without it a GTK3 app loads its
+# theme and never sees the generated palette.
+check "a GTK3 app is led to the seeded palette" \
+    bash -c '[ -L "$1/etc/skel/.config/gtk-3.0/gtk.css" ] &&
+             [ "$(readlink "$1/etc/skel/.config/gtk-3.0/gtk.css")" = "dank-colors.css" ]' _ "$MNT"
+
+# The icon theme three places name, and Dux Shell is the only one that changes it
+# per mode: it must start on the variant the session starts in.
+mode_key="iconTheme$([ "$seed_mode" = dark ] && echo Dark || echo Light)"
+want_icons="$(json_value "$MNT/etc/skel/.config/dms/settings.json" "$mode_key")"
+got_icons3="$(ini_value "$MNT/etc/skel/.config/gtk-3.0/settings.ini" gtk-icon-theme-name)"
+got_icons4="$(ini_value "$MNT/etc/skel/.config/gtk-4.0/settings.ini" gtk-icon-theme-name)"
+got_iconsd="$(dconf_value "$MNT/etc/dconf/db/local.d/01-icons" icon-theme)"
+check "the icon theme the desktop starts with is the one for its mode" \
+    bash -c '[ -n "$1" ] && [ "$2" = "$1" ] && [ "$3" = "$1" ] && [ "$4" = "$1" ]' \
+        _ "$want_icons" "$got_icons3" "$got_icons4" "$got_iconsd"
+
+# The dconf keyfiles are read by the installed desktop, so they are checked as the
+# files this live ISO ships: a copy that renamed or truncated one is invisible
+# until a session starts with the wrong defaults.
+for keyfile in 01-icons 02-nautilus-terminal 03-dark-theme; do
+    check "the installed /etc/dconf/db/local.d/$keyfile is the one the live ISO ships" \
+        cmp -s "/etc/dconf/db/local.d/$keyfile" "$MNT/etc/dconf/db/local.d/$keyfile"
+done
+check "the installed system is given a color-scheme before Dux Shell runs" \
+    grep -qE "^color-scheme='(prefer-dark|prefer-light)'$" "$MNT/etc/dconf/db/local.d/03-dark-theme"
+
 # ── Snapshots (snapper) ───────────────────────────────────────────────────────
 # The installer configures snapper for the btrfs layout only: separate
 # subvolumes are what make a snapshot of @ cheap, and an ext4 install has no
