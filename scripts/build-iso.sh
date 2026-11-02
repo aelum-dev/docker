@@ -106,6 +106,16 @@ echo "Downloading official packages..."
 pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" --disable-sandbox "${PACKAGES[@]}"
 echo "Downloaded: $(ls "$OFFLINE_CACHE"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 
+# Record exactly which files the synced repos resolve to. The -Syw above has
+# just downloaded them, so --print lists the same files out of the cache. The
+# offline mirror is built from this list — not from the whole cache, which
+# keeps every version ever downloaded across runs of a warm container.
+RESOLVED=()
+mapfile -t _resolved < <(
+    pacman -S --print --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
+)
+RESOLVED+=("${_resolved[@]}")
+
 # Download and build aur packages
 
 if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
@@ -149,7 +159,10 @@ if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
         # official mirrors. Include = /etc/pacman.conf keeps the real mirrors.
         # repo-add creates aur-local.db.tar.zst plus an 'aur-local.db' symlink,
         # which is what pacman's file:// retrieval requests.
-        repo-add /home/makepkg/pkg/aur-local.db.tar.zst /home/makepkg/pkg/*.pkg.tar.zst 2>/dev/null
+        # --prevent-downgrade: PKGDEST is warm too and can still hold an older
+        # build; this keeps the newest version per name in the DB regardless of
+        # the order the glob hands the files over.
+        repo-add --prevent-downgrade /home/makepkg/pkg/aur-local.db.tar.zst /home/makepkg/pkg/*.pkg.tar.zst 2>/dev/null
         cat > /tmp/offline-pacman.conf <<'EOF'
             Include = /etc/pacman.conf
 
@@ -174,19 +187,48 @@ EOF
             --config /tmp/offline-pacman.conf \
             --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" \
             "${aur_names[@]}"
+
+        mapfile -t _resolved < <(
+            pacman -S --print --config /tmp/offline-pacman.conf \
+                --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" \
+                "${aur_names[@]}"
+        )
+        RESOLVED+=("${_resolved[@]}")
     fi
 fi
 
-# Copy all packages to live-iso offline mirror
+# Rebuild the offline mirror from exactly what the repos resolve to right now.
+
+# The warm caches (OFFLINE_CACHE, PKGDEST) stay untouched — they are what makes
+# a rebuild cheap. But they accumulate every version ever downloaded, and
+# copying them wholesale into the mirror bakes all that history into the ISO:
+# repo-add keeps the newest per name in the DB but never removes superseded
+# files, and it indexes its arguments in glob order, so an older version that
+# sorts after a newer one (9.3 vs 9.10) would win. So the mirror is emptied
+# first and only the files pacman resolved above are copied in.
 
 MIRROR_DIR="${LIVE_ISO_DIR}/airootfs/var/cache/aelum/offline-mirror"
+rm -rf "${MIRROR_DIR:?}"
 mkdir -p "$MIRROR_DIR"
 
-cp "$OFFLINE_CACHE"/*.pkg.tar.zst "$MIRROR_DIR/"
-cp /home/makepkg/pkg/*.pkg.tar.zst "$MIRROR_DIR/" 2>/dev/null || true
+mirror_pkgs=()
+for r in "${RESOLVED[@]}"; do
+    case "$r" in
+        file://*) mirror_pkgs+=("${r#file://}") ;;
+        *) echo "ERROR: unexpected resolve output: $r" >&2; exit 1 ;;
+    esac
+done
+mapfile -t mirror_pkgs < <(printf '%s\n' "${mirror_pkgs[@]}" | sort -u)
+if [ ${#mirror_pkgs[@]} -eq 0 ]; then
+    echo "ERROR: offline mirror resolved to zero packages" >&2
+    exit 1
+fi
+for f in "${mirror_pkgs[@]}"; do
+    cp -f "$f" "$MIRROR_DIR/"
+done
 
 REPO_DB="$MIRROR_DIR/aelum-offline.db.tar.zst"
-repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst &>/dev/null || true
+repo-add "$REPO_DB" "$MIRROR_DIR"/*.pkg.tar.zst >/dev/null
 
 echo ""
 echo "Mirror: $MIRROR_DIR"

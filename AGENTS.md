@@ -10,9 +10,11 @@ gotchas) are in the workspace-root `AGENTS.md`.
 
 - **Iterating on a feature and testing it in a bootable ISO → `make local-dev`, then
   `./build-iso.sh` inside the container.** `aelum-local-shell` bind-mounts the real
-  `installer/` + `live-iso/` working trees and **keeps its pacman package cache, AUR build cache, and
-  archiso work dir warm across runs**, so a rebuild after a small change re-downloads only what
-  changed. This is the normal loop. Re-running `make local-dev` re-attaches to the same container.
+  `installer/` + `live-iso/` working trees and **keeps its pacman package cache and AUR build cache
+  warm across runs**, so a rebuild after a small change re-downloads only what changed; the offline
+  mirror is rebuilt from the current resolution every run, so the warm loop never ships older
+  packages (see *The pipeline* step 5). This is the normal loop. Re-running `make local-dev`
+  re-attaches to the same container.
 - **`make local-build` and `make build` are one-shot containers** (`docker compose run --rm`): every
   cache dies with the container, so each run re-downloads the full package set from the internet —
   slow on a metered line. Use them only when you actually want a clean throwaway build (e.g. the
@@ -41,10 +43,18 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
    Either way the rest of the script works on `/app/live-iso` + `/app/installer`.
 2. Builds the installer and copies `aelum-installer{,-cli}` into `live-iso/airootfs/usr/local/bin/`.
 3. `pacman -Syw --dbpath <empty dir> --cachedir <offline cache>` — a blank DB on purpose, so only the
-   dependency trees of `packages.x86_64` are pulled, not the whole world.
+   dependency trees of `packages.x86_64` are pulled, not the whole world. `pacman -S --print` then
+   records the exact files the just-synced repos resolve to.
 4. Builds `packages.aur.x86_64` with `makepkg` as a throwaway `makepkg` user behind a local
-   `[aur-local]` repo, then copies every `.pkg.tar.zst` into the offline mirror and `repo-add`s its DB.
-5. `mkarchiso -v -w work -o output -C pacman-offline.conf -m iso .` → `output/aelum-*.iso`,
+   `[aur-local]` repo (`repo-add --prevent-downgrade`, so an older build kept in the warm PKGDEST
+   can never win the DB), and resolves those names + their dependency trees the same way.
+5. **The offline mirror is rebuilt from the resolved list on every run.** The download cache and
+   PKGDEST stay warm — that is what makes a rebuild cheap — but they accumulate every version ever
+   downloaded; copying them wholesale bakes that history into the ISO (repo-add keeps the newest per
+   name in the DB but never removes superseded files, and indexes its arguments in glob order, which
+   for versions like `9.3` vs `9.10` picks the older one). The mirror is emptied first, only the
+   resolved files are copied in, and its DB is built fresh.
+6. `mkarchiso -v -w work -o output -C pacman-offline.conf -m iso .` → `output/aelum-*.iso`,
    bind-mounted to the host and chowned via `OUTPUT_UID`/`OUTPUT_GID` (the Makefile passes the real
    `id -u`/`id -g`; the shell doesn't export them).
 
