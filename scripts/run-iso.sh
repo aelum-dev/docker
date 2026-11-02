@@ -124,6 +124,7 @@ else
         -display "$DISPLAY_OPTS"
         -device "$GPU_DEV"
         -device virtio-serial-pci
+        -audio driver=pipewire,model=virtio
         -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
         -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on
     )
