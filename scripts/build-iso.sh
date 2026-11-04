@@ -102,8 +102,28 @@ OFFLINE_CACHE=/tmp/offline-cache-pacman
 BLANK_DB=/tmp/blankdb-pacman
 mkdir -p "$OFFLINE_CACHE" "$BLANK_DB/sync"
 
+# Resolve through the real mirrors plus the [aelum] repository, so packages the
+# distro's own repo ships (currently aelum-video-player, listed in
+# packages.x86_64) resolve here and get baked into the offline mirror below —
+# the live session and every install then get them without network. The
+# container's keyring does not hold the Aelum release key, so signature
+# checking is turned off for that repo only; the official mirrors keep
+# enforcing their own SigLevel. mkarchiso deliberately does NOT see this repo:
+# by the time it runs, the mirror already holds every resolved file, so the
+# live session can never end up with a newer version than the mirror carries.
+# (Include = /etc/pacman.conf keeps the real mirrors — same pattern as the
+# [aur-local] config below.)
+cat > /tmp/build-pacman.conf <<'EOF'
+Include = /etc/pacman.conf
+
+[aelum]
+Server = https://cdn.aelum.dev/repo/$arch
+SigLevel = Never
+EOF
+
 echo "Downloading official packages..."
-pacman -Syw --noconfirm --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" --disable-sandbox "${PACKAGES[@]}"
+pacman -Syw --noconfirm --disable-sandbox --config /tmp/build-pacman.conf \
+    --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
 echo "Downloaded: $(ls "$OFFLINE_CACHE"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 
 # Record exactly which files the synced repos resolve to. The -Syw above has
@@ -112,7 +132,8 @@ echo "Downloaded: $(ls "$OFFLINE_CACHE"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 # keeps every version ever downloaded across runs of a warm container.
 RESOLVED=()
 mapfile -t _resolved < <(
-    pacman -S --print --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
+    pacman -S --print --config /tmp/build-pacman.conf \
+        --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
 )
 RESOLVED+=("${_resolved[@]}")
 

@@ -44,7 +44,11 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
 2. Builds the installer and copies `aelum-installer{,-cli}` into `live-iso/airootfs/usr/local/bin/`.
 3. `pacman -Syw --dbpath <empty dir> --cachedir <offline cache>` — a blank DB on purpose, so only the
    dependency trees of `packages.x86_64` are pulled, not the whole world. `pacman -S --print` then
-   records the exact files the just-synced repos resolve to.
+   records the exact files the just-synced repos resolve to. Both calls run through a generated config
+   (`Include = /etc/pacman.conf` + `[aelum]`, `SigLevel = Never` scoped to that repo), so the
+   distro's own repository resolves too and its packages (currently `aelum-video-player`) are baked
+   into the mirror like any other. `mkarchiso` itself never sees `[aelum]` — it installs everything
+   from the mirror, which is what keeps the live session and the mirror on the same versions.
 4. Builds `packages.aur.x86_64` with `makepkg` as a throwaway `makepkg` user behind a local
    `[aur-local]` repo (`repo-add --prevent-downgrade`, so an older build kept in the warm PKGDEST
    can never win the DB), and resolves those names + their dependency trees the same way.
