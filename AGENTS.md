@@ -113,6 +113,19 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
 
 ## What `verify-installed.sh` proves
 
+Beyond the layout checks (fstab UUIDs, no pinned `subvol=`, rEFInd entry + kernel in the
+per-install ESP dir, packages, user, hostname) it also proves the **package repository**
+setup: the `[aelum]` block in the installed `pacman.conf` (section + `SigLevel` + `Server`
+lines, and that the stock file was appended to, not rewritten), the release public key at
+`/usr/share/aelum/keyring/aelum-release.gpg` (carried by an isocopy job), and that the key
+is in the target's pacman keyring **valid** — a copy of the target's whole `gnupg` dir read
+with `gpg --no-autostart` (pacman 7.1 + gnupg 2.5 use the classic `pubring.gpg`; the trust
+lives in the target's own trustdb). `pub:f:` — signed by the Pacman Keyring Master Key —
+is what `--lsign-key` produces and what pacman requires before it accepts a signature.
+Same checks on ext4 and btrfs — the repository is not snapshot machinery. The publisher
+itself is tested on the host: `repo/fake-repo.sh` (offline fixture) and, once published,
+real-pacman `-Sy`/`-Sp`/`-Sw` against `cdn.aelum.dev/repo/…` (see `repo/REPO.md`).
+
 It runs **inside the guest** and never calls the installer — it re-opens LUKS, mounts the installed
 root read-only and asserts the on-disk result: root filesystem type; fstab mounting `/`, the ESP at
 `/efi`, this install's `aelum/<id>/` at `/boot` (bind) and `@home` + `/.snapshots` on btrfs with the

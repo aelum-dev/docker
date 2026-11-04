@@ -290,6 +290,54 @@ check "resolver is a link into /run, not a file inside the root" \
 check "the resolver link points at NetworkManager's runtime resolv.conf" \
     bash -c '[ "$(readlink "$1/etc/resolv.conf")" = "/run/NetworkManager/resolv.conf" ]' _ "$MNT"
 
+# ── Package repository ────────────────────────────────────────────────────────
+# The installer enables the [aelum] repository and trusts its signing key
+# (installer configure/pacman_repo.go; constants in shared/config.go), so a
+# fresh install installs the distro's own applications with no hand-editing.
+# The repository itself is published by repo/publish-repo.sh; this only proves
+# the installed system is configured to use it. Same checks on ext4 and btrfs —
+# the repository is not snapshot machinery.
+section "package repository"
+AELUM_RELEASE_FPR=728F5F59FB2F5A88C6EE28D4930A672A3A1B5B60
+check "pacman.conf enables the [aelum] repository" grep -q '^\[aelum\]' "$MNT/etc/pacman.conf"
+check "[aelum] requires signatures on packages and databases" \
+    grep -Fq 'SigLevel = Required DatabaseRequired' "$MNT/etc/pacman.conf"
+check "[aelum] points at the release CDN" \
+    grep -Fq 'Server = https://cdn.aelum.dev/repo/$arch' "$MNT/etc/pacman.conf"
+check "the stock pacman.conf was appended to, not rewritten" \
+    grep -q 'Include = /etc/pacman.d/mirrorlist' "$MNT/etc/pacman.conf"
+check "the release public key is in the installed system" \
+    [ -s "$MNT/usr/share/aelum/keyring/aelum-release.gpg" ]
+# Read the target's pacman keyring the way pacman itself sees it. Measured on a
+# real install: pacman 7.1 + gnupg 2.5 keep keys in the classic pubring.gpg (no
+# pubring.kbx exists), and the trust that makes a key usable lives in the
+# target's own trustdb.gpg — so copy the whole keyring directory (the mount is
+# read-only, and gpg may touch its homedir) and read that copy with
+# --no-autostart, so no running keyboxd can take over the lookup. After
+# pacman-key --add + --lsign-key the key reports "pub:f:" — full validity,
+# signed by the Pacman Keyring Master Key, whose ownertrust is ultimate. f (or
+# u) is exactly what gpgme/pacman requires before accepting a signature made
+# by the key; "u" on the key itself would mean a self-signature chain, which
+# is not what --lsign-key produces.
+AELUM_KEYRING_COPY=/tmp/aelum-verify-keyring
+rm -rf "$AELUM_KEYRING_COPY"
+cp -a "$MNT/etc/pacman.d/gnupg" "$AELUM_KEYRING_COPY"
+aelum_keyring_gpg() {
+    gpg --no-autostart --homedir "$AELUM_KEYRING_COPY" --with-colons "$@" 2>/dev/null
+}
+aelum_key_in_keyring() {
+    aelum_keyring_gpg --list-keys "$AELUM_RELEASE_FPR" \
+        | grep -q "^fpr:::::::::$AELUM_RELEASE_FPR:"
+}
+check "the release key is in the installed pacman keyring" aelum_key_in_keyring
+aelum_key_locally_signed() {
+    local validity
+    validity="$(aelum_keyring_gpg --list-keys "$AELUM_RELEASE_FPR" | awk -F: '/^pub:/{print $2; exit}')"
+    [[ "$validity" == f || "$validity" == u ]]
+}
+check "the release key is locally signed and valid in the target keyring (--lsign-key ran)" aelum_key_locally_signed
+rm -rf "$AELUM_KEYRING_COPY"
+
 # ── The colors a session starts with ──────────────────────────────────────────
 # Nothing in the installed system puts a palette into GTK until Dux Shell has
 # applied a theme, so the state the seeded home and the copied dconf keyfiles
