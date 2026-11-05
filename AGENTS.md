@@ -46,7 +46,8 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
    dependency trees of `packages.x86_64` are pulled, not the whole world. `pacman -S --print` then
    records the exact files the just-synced repos resolve to. Both calls run through a generated config
    (`Include = /etc/pacman.conf` + `[aelum]`, `SigLevel = Never` scoped to that repo), so the
-   distro's own repository resolves too and its packages (currently `aelum-video-player`) are baked
+   distro's own repository resolves too and its packages (currently `aelum-video-player` and
+    `aelum-package-installer`) are baked
    into the mirror like any other. `mkarchiso` itself never sees `[aelum]` — it installs everything
    from the mirror, which is what keeps the live session and the mirror on the same versions.
 4. Builds `packages.aur.x86_64` with `makepkg` as a throwaway `makepkg` user behind a local
@@ -126,9 +127,14 @@ is in the target's pacman keyring **valid** — a copy of the target's whole `gn
 with `gpg --no-autostart` (pacman 7.1 + gnupg 2.5 use the classic `pubring.gpg`; the trust
 lives in the target's own trustdb). `pub:f:` — signed by the Pacman Keyring Master Key —
 is what `--lsign-key` produces and what pacman requires before it accepts a signature.
-Same checks on ext4 and btrfs — the repository is not snapshot machinery. The publisher
-itself is tested on the host: `repo/fake-repo.sh` (offline fixture) and, once published,
-real-pacman `-Sy`/`-Sp`/`-Sw` against `cdn.aelum.dev/repo/…` (see `repo/REPO.md`).
+It also proves the target keeps **no sync database for a repository its pacman.conf does not
+name**: `pacstrap -K` resolves everything through the live session's `[aelum-offline]` and
+pacman writes that database under the `--root` it was given, and a stale `.db` in the sync
+directory is invisible to pacman but not to anything that reads the directory — the package
+manager showed a second copy of every package in it. Same checks on ext4 and btrfs — the
+repository is not snapshot machinery. The publisher itself is tested on the host:
+`repo/fake-repo.sh` (offline fixture) and, once published, real-pacman `-Sy`/`-Sp`/`-Sw`
+against `cdn.aelum.dev/repo/…` (see `repo/REPO.md`).
 
 It runs **inside the guest** and never calls the installer — it re-opens LUKS, mounts the installed
 root read-only and asserts the on-disk result: root filesystem type; fstab mounting `/`, the ESP at

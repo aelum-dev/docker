@@ -306,6 +306,28 @@ check "[aelum] points at the release CDN" \
     grep -Fq 'Server = https://cdn.aelum.dev/repo/$arch' "$MNT/etc/pacman.conf"
 check "the stock pacman.conf was appended to, not rewritten" \
     grep -q 'Include = /etc/pacman.d/mirrorlist' "$MNT/etc/pacman.conf"
+# The install resolves every package through the live session's [aelum-offline]
+# repository (`pacstrap -K` copies no pacman.conf and uses the live one), and
+# pacman writes the database it resolved from under the --root it was given.
+# Left in place that file is a repository the target's own pacman.conf never
+# names: pacman ignores it — measured against pacman 7, a database on disk for
+# an unconfigured repository is not listed by -Sl and never chosen by -Sp —
+# but anything that reads the sync directory instead of the config shows a
+# second copy of every package in it, which is how the package manager listed
+# one installed package twice, "Install" beside "Installed".
+# installer configure/dropForeignSyncDBs removes it; this is the on-disk proof.
+foreign_sync_dbs() {
+    local db repo found=0
+    for db in "$MNT"/var/lib/pacman/sync/*.db; do
+        [ -e "$db" ] || continue
+        repo=${db##*/}; repo=${repo%.db}
+        grep -q "^\[$repo\]" "$MNT/etc/pacman.conf" && continue
+        echo "foreign repository database: $repo"
+        found=1
+    done
+    return "$found"
+}
+check "no sync database for a repository the target does not configure" foreign_sync_dbs
 check "the release public key is in the installed system" \
     [ -s "$MNT/usr/share/aelum/keyring/aelum-release.gpg" ]
 # Read the target's pacman keyring the way pacman itself sees it. Measured on a
