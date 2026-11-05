@@ -103,8 +103,9 @@ BLANK_DB=/tmp/blankdb-pacman
 mkdir -p "$OFFLINE_CACHE" "$BLANK_DB/sync"
 
 # Resolve through the real mirrors plus the [aelum] repository, so packages the
-# distro's own repo ships (currently aelum-video-player, listed in
-# packages.x86_64) resolve here and get baked into the offline mirror below —
+# distro's own repo ships (currently aelum-video-player and
+# aelum-package-installer, listed in packages.x86_64) resolve here and get
+# baked into the offline mirror below —
 # the live session and every install then get them without network. The
 # container's keyring does not hold the Aelum release key, so signature
 # checking is turned off for that repo only; the official mirrors keep
