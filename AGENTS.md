@@ -43,7 +43,10 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
    Either way the rest of the script works on `/app/live-iso` + `/app/installer`.
 2. Builds the installer and copies `aelum-installer{,-cli}` into `live-iso/airootfs/usr/local/bin/`.
 3. `pacman -Syw --dbpath <empty dir> --cachedir <offline cache>` — a blank DB on purpose, so only the
-   dependency trees of `packages.x86_64` are pulled, not the whole world. `pacman -S --print` then
+   dependency trees of `packages.x86_64` **plus the installer's own package lists** are pulled, not
+   the whole world — the second set comes from `go run ./backend/scripts/pkg-list.go` in the installer
+   tree, so the mirror is exactly "what the live session runs ∪ what an install writes" and neither
+   list is duplicated by hand (live-iso/AGENTS.md → the mirror note). `pacman -S --print` then
    records the exact files the just-synced repos resolve to. Both calls run through a generated config
    (`Include = /etc/pacman.conf` + `[aelum]`, `SigLevel = Never` scoped to that repo), so the
    distro's own repository resolves too and its packages (currently `aelum-video-player` and

@@ -290,6 +290,13 @@ check "resolver is a link into /run, not a file inside the root" \
 check "the resolver link points at NetworkManager's runtime resolv.conf" \
     bash -c '[ "$(readlink "$1/etc/resolv.conf")" = "/run/NetworkManager/resolv.conf" ]' _ "$MNT"
 
+# The package installer's AUR page builds what it installs, and makepkg refuses
+# to run without these tools. The image ships base-devel (the installer's
+# installbase.BasePackages; it reaches the mirror through
+# live-iso/packages.target.x86_64), so an installed system can build an AUR
+# package without a setup step. Without it the AUR page says so and refuses.
+check "the AUR build tools are installed (base-devel)" pkg_installed base-devel
+
 # ── Package repository ────────────────────────────────────────────────────────
 # The installer enables the [aelum] repository and trusts its signing key
 # (installer configure/pacman_repo.go; constants in shared/config.go), so a

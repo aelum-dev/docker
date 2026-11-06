@@ -91,9 +91,28 @@ AUR_PACKAGES_FILE="${LIVE_ISO_DIR}/packages.aur.x86_64"
 
 # Read packages (skip empty lines and comments)
 mapfile -t PACKAGES < <(grep -v '^\s*$' "$PACKAGES_FILE" | grep -v '^\s*#')
+# What the installer puts into a target, read from the installer's own lists
+# (backend/scripts/pkg-list.go). The mirror is the union of that and the live
+# profile, which is what lets live-iso/packages.x86_64 stay a description of
+# the live session — a host that boots, displays and installs — rather than a
+# copy of the desktop. A package only the installed system needs (base-devel,
+# firefox, the distro's own apps) reaches the mirror from here and nowhere
+# else, so it cannot drift out of it.
+mapfile -t INSTALLER_PACKAGES < <(cd "$INSTALLER_DIR" && go run ./backend/scripts/pkg-list.go)
 mapfile -t AUR_PACKAGES < <(grep -v '^\s*$' "$AUR_PACKAGES_FILE" | grep -v '^\s*#')
 
-echo "Official packages: ${#PACKAGES[@]}"
+# The AUR names appear in the installer's own lists (they are part of what an
+# install writes), but they are not in any mirror yet — they are built further
+# down and resolved into the mirror there. Asking the mirrors for them here
+# would fail the whole download, so they are filtered out of this pass only.
+if [ ${#AUR_PACKAGES[@]} -gt 0 ]; then
+    mapfile -t _official < <(printf '%s\n' "${INSTALLER_PACKAGES[@]}" |
+        grep -vxF -f <(printf '%s\n' "${AUR_PACKAGES[@]}"))
+    INSTALLER_PACKAGES=("${_official[@]}")
+fi
+
+echo "Live-session packages: ${#PACKAGES[@]}"
+echo "Installer packages: ${#INSTALLER_PACKAGES[@]}"
 echo "AUR packages: ${#AUR_PACKAGES[@]}"
 
 # Download official packages with dependencies
@@ -124,7 +143,7 @@ EOF
 
 echo "Downloading official packages..."
 pacman -Syw --noconfirm --disable-sandbox --config /tmp/build-pacman.conf \
-    --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
+    --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}" "${INSTALLER_PACKAGES[@]}"
 echo "Downloaded: $(ls "$OFFLINE_CACHE"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 
 # Record exactly which files the synced repos resolve to. The -Syw above has
@@ -134,7 +153,7 @@ echo "Downloaded: $(ls "$OFFLINE_CACHE"/*.pkg.tar.zst 2>/dev/null | wc -l)"
 RESOLVED=()
 mapfile -t _resolved < <(
     pacman -S --print --config /tmp/build-pacman.conf \
-        --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}"
+        --dbpath "$BLANK_DB" --cachedir "$OFFLINE_CACHE" "${PACKAGES[@]}" "${INSTALLER_PACKAGES[@]}"
 )
 RESOLVED+=("${_resolved[@]}")
 
