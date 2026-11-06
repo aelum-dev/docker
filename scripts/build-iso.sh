@@ -131,10 +131,32 @@ mkdir -p "$OFFLINE_CACHE" "$BLANK_DB/sync"
 # enforcing their own SigLevel. mkarchiso deliberately does NOT see this repo:
 # by the time it runs, the mirror already holds every resolved file, so the
 # live session can never end up with a newer version than the mirror carries.
-# (Include = /etc/pacman.conf keeps the real mirrors — same pattern as the
-# [aur-local] config below.)
+#
+# The include is not the stock file itself: the desktop set now carries
+# lib32-* GPU driver packages (installer installdesktop/drivers.go), and the
+# resolution config must name [multilib] for them to resolve at all. Two
+# measured shapes of /etc/pacman.conf are handled: the pacman package's file
+# keeps the section commented (the awk uncomments exactly that section —
+# #[multilib-testing] and every other comment pass through byte-identical),
+# and the archlinux:latest image's file has no multilib section at all (it is
+# customised with NoExtract lines; measured) — when the copy names no
+# [multilib], the section is appended. Same section, same Include the stock
+# file carries; the target's own [multilib] still comes from
+# configure/pacman_repo.go. -Syw and -S --print below both read this one
+# config — that shared resolution is the invariant.
+awk '
+    /^#?\[multilib\][[:space:]]*$/ { insec = 1; sub(/^#/, ""); print; next }
+    /^[[:space:]]*#?\[/            { insec = 0 }
+    insec && /^#(Include|Server|SigLevel|Usage)[[:space:]]*=/ { sub(/^#/, "") }
+    { print }
+' /etc/pacman.conf > /tmp/pacman-build.conf
+
+if ! grep -q '^\[multilib\]' /tmp/pacman-build.conf; then
+    printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /tmp/pacman-build.conf
+fi
+
 cat > /tmp/build-pacman.conf <<'EOF'
-Include = /etc/pacman.conf
+Include = /tmp/pacman-build.conf
 
 [aelum]
 Server = https://cdn.aelum.dev/repo/$arch

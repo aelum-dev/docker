@@ -20,7 +20,9 @@
 # while iterating (e.g. MODES=auto FILESYSTEMS=ext4 LVMS=0).
 #
 # Forwarded to test-install.sh: LUKS_PASS, USER_PASS, USERNAME, SSH_PORT, QEMU_QVM,
-# DISK_PATH, VERIFY, SHARED_INSTALLER, SHARED_DIR, ISO.
+# DISK_PATH, VERIFY, SHARED_INSTALLER, SHARED_DIR, ISO, GPU_DRIVER. GPU_DRIVER
+# is not a matrix dimension — it applies the same forced driver set to every
+# cell (see test-install.sh).
 
 set -uo pipefail
 
@@ -55,6 +57,7 @@ for mode in $MODES; do
                 echo "================================================================"
                 if MODE=auto MANUAL="$([ "$mode" = manual ] && echo 1 || echo 0)" \
                      FILESYSTEM="$fs" LUKS="$luks" LVM="$lvm" \
+                     GPU_DRIVER="${GPU_DRIVER:-}" \
                      SHARED_INSTALLER="${SHARED_INSTALLER:-0}" \
                      LUKS_PASS="${LUKS_PASS:-aelum-luks}" \
                      USER_PASS="${USER_PASS:-aelum}" \

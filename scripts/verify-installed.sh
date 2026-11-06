@@ -10,6 +10,10 @@
 #   LUKS        0 | 1          root partition is LUKS2-encrypted
 #   LUKS_PASS   LUKS2 passphrase (LUKS=1)
 #   LVM         0 | 1          root (and ext4 home) live on LVM logical volumes
+#   GPU_DRIVER  empty | amd | intel | nvidia | mesa
+#                              the --gpu-driver the install was forced with
+#                              (empty = the CLI's auto detection, which on the
+#                              virtio/VGA guest picks the mesa fallback set)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
 #   ENABLE_SSHD 0 | 1          after a *passing* verification, enable
 #                              sshd.service in the target so follow-up
@@ -27,6 +31,7 @@ FILESYSTEM="${FILESYSTEM:-btrfs}"
 LUKS="${LUKS:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 LVM="${LVM:-0}"
+GPU_DRIVER="${GPU_DRIVER:-}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
 
 MNT=/mnt
@@ -323,6 +328,33 @@ check "pacman.conf enables the [multilib] repository" grep -q '^\[multilib\]' "$
 check "[multilib] resolves through the mirrorlist, not a hard-coded server" \
     bash -c 'grep -A1 "^\[multilib\]" "$1/etc/pacman.conf" | grep -Fq "Include = /etc/pacman.d/mirrorlist"' _ "$MNT"
 check "multilib-testing is not enabled" bash -c '! grep -q "^\[multilib-testing\]" "$1/etc/pacman.conf"' _ "$MNT"
+# The desktop set carries a GPU driver set chosen for the hardware (installer
+# installdesktop/drivers.go), and every set the table can produce provides both
+# the vulkan-driver and lib32-vulkan-driver virtuals — so `pacman -Q` on a
+# virtual names a provider from the installed DB, and the provider question
+# `pacman -S steam` used to ask can never appear here. The QEMU guest's display
+# is a QEMU device the table does not claim, so an auto run gets the mesa
+# fallback set and no NVIDIA stack; GPU_DRIVER=nvidia is the forced cell that
+# proves the ~440 MiB NVIDIA set resolves and installs from the offline mirror.
+check "the installed system provides vulkan-driver" pkg_installed vulkan-driver
+check "the installed system provides lib32-vulkan-driver" pkg_installed lib32-vulkan-driver
+if [ "$GPU_DRIVER" = "nvidia" ]; then
+    # The NVIDIA half of drivers.go: the install must name the modules in
+    # MODULES= itself (autodetect inspects the live session, which has no
+    # NVIDIA module loaded here), and mkinitcpio -P ran with them — the
+    # install reaching this point at all is proof the presets regenerated.
+    check "mkinitcpio.conf names the NVIDIA modules for early KMS" \
+        grep -q '^MODULES=(nvidia nvidia_drm nvidia_modeset)' "$MNT/etc/mkinitcpio.conf"
+else
+    no_nvidia_pkgs() {
+        local p found=0
+        for p in nvidia-open-lts nvidia-utils lib32-nvidia-utils; do
+            if pkg_installed "$p"; then echo "unexpected NVIDIA package: $p"; found=1; fi
+        done
+        return "$found"
+    }
+    check "no NVIDIA driver package on this (non-NVIDIA) guest" no_nvidia_pkgs
+fi
 # The install resolves every package through the live session's [aelum-offline]
 # repository (`pacstrap -K` copies no pacman.conf and uses the live one), and
 # pacman writes the database it resolved from under the --root it was given.

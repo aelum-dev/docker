@@ -246,11 +246,13 @@ test: test-matrix
 ##   LVM=1 make test-one                  # root (and ext4 home) on LVM logical volumes
 ##   MANUAL=1 make test-one               # manual partitioning (formats Boot + System)
 ##   FILESYSTEM=ext4 make test-one        # root filesystem (btrfs | ext4)
+##   GPU_DRIVER=nvidia make test-one      # force a GPU driver set (the guest has no NVIDIA; this proves the set resolves + installs)
 ##   VERIFY=0 make test-one               # skip the post-install inspection
 ##   SHARED_INSTALLER=1 make test-one     # drive the install with /shared/aelum-installer-cli
 test-one:
 	@MODE=auto \
 	 FILESYSTEM="$(FILESYSTEM)" LUKS="$(LUKS)" LVM="$(LVM)" MANUAL="$(MANUAL)" \
+	 GPU_DRIVER="$(GPU_DRIVER)" \
 	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
 	 LUKS_PASS="$(LUKS_PASS)" USER_PASS="$(USER_PASS)" \
 	 USERNAME="$(USERNAME)" SSH_PORT="$(SSH_PORT)" \
@@ -269,6 +271,7 @@ test-boot:
 ##   SHARED_INSTALLER=1 make test-matrix            # drive installs from /shared
 test-matrix:
 	@MODES="$(MODES)" FILESYSTEMS="$(FILESYSTEMS)" LUKSES="$(LUKSES)" LVMS="$(LVMS)" \
+	 GPU_DRIVER="$(GPU_DRIVER)" \
 	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
 	 ./scripts/test-all.sh
 
