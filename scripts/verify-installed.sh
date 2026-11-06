@@ -313,6 +313,16 @@ check "[aelum] points at the release CDN" \
     grep -Fq 'Server = https://cdn.aelum.dev/repo/$arch' "$MNT/etc/pacman.conf"
 check "the stock pacman.conf was appended to, not rewritten" \
     grep -q 'Include = /etc/pacman.d/mirrorlist' "$MNT/etc/pacman.conf"
+# multilib is the only source of steam and the lib32-* libraries it needs, and
+# the package manager lists exactly the repositories pacman.conf names, so the
+# stock file's commented section is uncommented by installer
+# configure/enableMultilibRepo. The mirrorlist the installer writes carries
+# $repo, so no Server line of its own is needed — and [multilib-testing] and the
+# #[custom] example must still be commented.
+check "pacman.conf enables the [multilib] repository" grep -q '^\[multilib\]' "$MNT/etc/pacman.conf"
+check "[multilib] resolves through the mirrorlist, not a hard-coded server" \
+    bash -c 'grep -A1 "^\[multilib\]" "$1/etc/pacman.conf" | grep -Fq "Include = /etc/pacman.d/mirrorlist"' _ "$MNT"
+check "multilib-testing is not enabled" bash -c '! grep -q "^\[multilib-testing\]" "$1/etc/pacman.conf"' _ "$MNT"
 # The install resolves every package through the live session's [aelum-offline]
 # repository (`pacstrap -K` copies no pacman.conf and uses the live one), and
 # pacman writes the database it resolved from under the --root it was given.
