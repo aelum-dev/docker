@@ -292,9 +292,9 @@ check "the resolver link points at NetworkManager's runtime resolv.conf" \
 
 # The package installer's AUR page builds what it installs, and makepkg refuses
 # to run without these tools. The image ships base-devel (the installer's
-# installbase.BasePackages; it reaches the mirror through
-# live-iso/packages.target.x86_64), so an installed system can build an AUR
-# package without a setup step. Without it the AUR page says so and refuses.
+# installbase.BasePackages; build-iso.sh reads that list through the installer's
+# pkg-list.go when it fills the offline mirror), so an installed system can build
+# an AUR package without a setup step. Without it the AUR page says so and refuses.
 check "the AUR build tools are installed (base-devel)" pkg_installed base-devel
 
 # ── Package repository ────────────────────────────────────────────────────────
