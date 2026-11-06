@@ -1,6 +1,7 @@
 .PHONY: help build local-build build-local local-clean image update dev local-dev attach stop clean \
         release release-sign release-upload release-website wkd \
-        run run-clean run-disk vm-clean test test-one test-boot test-matrix demo-snapshots snapshot-rollback
+        run run-clean run-disk vm-clean boot-show \
+        test test-one test-boot test-matrix demo-snapshots snapshot-rollback
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -44,6 +45,7 @@ help:
 	@echo "  make run-disk     Boot what is installed on vdisk.qcow2 (no ISO; shows its rEFInd)"
 	@echo "  make run-clean    Delete OVMF_VARS.fd then boot (fix corrupt NVRAM)"
 	@echo "  make vm-clean       Delete vdisk.qcow2 + OVMF_VARS.fd (fresh test disk)"
+	@echo "  make boot-show    Show which of the two the UEFI boot order points at"
 	@echo ""
 	@echo "Headless test (SSH + installer CLI):"
 	@echo "  make test             Run EVERY install variation (auto/manual x btrfs/ext4 x LUKS x LVM)"
@@ -213,6 +215,15 @@ run-clean:
 vm-clean:
 	@rm -f vdisk.qcow2 OVMF_VARS.fd
 
+# Read-only: run/run-disk each point the UEFI boot order at what they boot, so
+# switching it by hand would be overwritten on the next run anyway. This is the
+# one that answers "which one would boot, and why did it boot the wrong thing".
+# To drive the order without launching a VM (a hand-written qemu-system command),
+# use ./scripts/boot-target.sh show|iso|disk|reset.
+## boot-show: print the UEFI boot order with its labels, and what would boot next
+boot-show:
+	@./scripts/boot-target.sh show
+
 # ===========================================================================
 # QEMU — headless test (boot + drive aelum-installer-cli over SSH)
 # ===========================================================================
@@ -262,7 +273,8 @@ test-matrix:
 	 ./scripts/test-all.sh
 
 ## run-disk: boot the system installed on the test disk, through its own rEFInd
-##       (no ISO, no -boot d: OVMF follows its own boot order)
+##       (no ISO, no -boot d, and its entry is moved to the head of the UEFI
+##       boot order first — a BootOrder left over from an ISO run would win)
 run-disk:
 	@BOOT_DISK=1 ./scripts/run-iso.sh
 

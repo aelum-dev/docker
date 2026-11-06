@@ -86,6 +86,24 @@ MONITOR="${MONITOR:-}"
 SERIAL="${SERIAL:-}"
 SSH_PORT="${SSH_PORT:-2222}"
 
+# --- Which boot target OVMF uses -------------------------------------------
+# A persisted BootOrder beats QEMU's -boot d: while that variable exists OVMF
+# boots strictly in its own order, so -cdrom + -boot d boots whatever the last
+# install put first, and a disk run boots the ISO when a test run promoted the
+# DVD entry. Ask for the target instead of hoping the NVRAM agrees — scripts/
+# boot-target.sh show prints what is in there, ISO_LABEL/DISK_LABEL override the
+# labels on a machine whose entries are named differently, and docker/AGENTS.md
+# has the measured facts about what OVMF does to that order by itself.
+if [ -f "$OVMF_VARS" ]; then
+    if [ "$BOOT_DISK" = 1 ]; then
+        "$PROFILE_DIR/scripts/boot-target.sh" disk \
+            || echo "WARN: no installed entry in $OVMF_VARS; OVMF will walk its BootOrder instead (make demo-snapshots writes one)"
+    else
+        "$PROFILE_DIR/scripts/boot-target.sh" iso \
+            || echo "WARN: could not point $OVMF_VARS at the ISO; this run boots what the boot order says (scripts/boot-target.sh show)"
+    fi
+fi
+
 # --- Run QEMU ---
 QEMU_ARGS=(
     -enable-kvm

@@ -32,6 +32,11 @@ make run-disk       # boot what is installed on the test disk, through its own b
 make vm-clean       # fresh test disk + fresh UEFI variables
 ```
 
+Which of those two you get is a UEFI variable, not a QEMU flag: OVMF keeps a boot order in
+`OVMF_VARS.fd` and follows it instead of `-boot d`. `make run` and `make run-disk` each point it at
+what they boot; `make boot-show` prints what it currently points at and why a run booted the wrong
+thing.
+
 ## Test an install
 
 Tests run in QEMU against a 20 GB virtual disk, not inside the build container: that disk is the only

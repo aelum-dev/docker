@@ -92,12 +92,33 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
 
 - **`make vm-clean`** recreates `vdisk.qcow2` + `OVMF_VARS.fd`. **`make run-clean`** only drops the
   NVRAM (a corrupt `BootOrder` otherwise boots nothing).
+- **Which of the two targets a run boots is a UEFI variable, not a QEMU flag.** `run-iso.sh` points
+  that order at its own target on every run (`BOOT_DISK=1` → the installed entry, otherwise the CD's),
+  so `make run` and `make run-disk` are right without being told — and no hand-set order outlives
+  them. `make boot-show` reads it (`scripts/boot-target.sh show|iso|disk|reset` does the same from a
+  hand-written QEMU command line). The measured facts, in order of surprise:
+  - While a `BootOrder` variable exists OVMF boots strictly from it and ignores `-boot d` entirely:
+    `-cdrom` + `-boot d` boots the installed disk when an install put its entry first, and a
+    `run-disk` boots the ISO when a test run promoted the DVD entry.
+  - `promote` rewrites BootOrder's data in place and leaves every `Boot####` entry byte-identical, so
+    the other target stays one switch away. BootOrder is an array of **UINT16** (its size grows by 2
+    bytes per entry); read it as UINT32 and the promoted number still lands in the right first two
+    bytes, which is how that bug hid for as long as it did.
+  - OVMF **deletes the CD's entry when the VM boots without a CD** and reuses its number for a PXE
+    entry, so after a `run-disk` there is nothing to promote. `boot-target.sh iso` then *blanks* the
+    order (every slot set to `ffff`) — no entry is retired, OVMF finds nothing listed and boots the
+    devices present with QEMU's `-boot d` at the head, and the next `run-disk` points the order back
+    at the install by itself. Nothing here deletes an installed system's firmware entry; that stays
+    `demo-snapshots` work.
+  - Dropping `BootOrder` by itself does not boot the CD: the order OVMF rebuilds puts a persisted OS
+    entry ahead of it.
+  - OVMF keeps `BootCurrent` boot-services-only, so it never reaches `OVMF_VARS.fd` (measured: the
+    name is not in the file). A run confirms its target from inside the guest — the live session has
+    `/version` and `/shared` and an enabled sshd, the installed test system has neither.
 - `test-install.sh` resets `OVMF_VARS.fd` on **auto** runs only (an install needs a clean boot order);
   **boot** runs preserve it, because `run-disk` and `snapshot-rollback` follow the entries an install
-  wrote. Before an ISO boot it promotes the ISO's own firmware entry with
-  `scripts/uefi-vars.py promote "QEMU DVD-ROM"`: while that variable exists OVMF boots strictly from
-  it and ignores `-boot d`, and the order it rebuilds when `BootOrder` is missing puts a persisted
-  install entry ahead of the CD — a boot run would otherwise boot the installed disk and hang there.
+  wrote — and ask `boot-target.sh iso` for the CD entry, so a preserved order cannot land the run on the
+  installed disk.
 - A stale `Aelum` entry pointing at a disk that has since been recreated fails with
   `BdsDxe: … Not Found`; `make demo-snapshots` deletes the old entries and writes a fresh one instead
   of reusing them.
@@ -176,7 +197,9 @@ scripts/
   build-iso.sh             # the pipeline above (inside the container)
   stage-local-repos.sh     # stage local trees for local-build
   run-iso.sh               # QEMU launch (ISO or installed disk; HEADLESS/MONITOR for capture)
+  boot-target.sh           # read/switch which of the two the UEFI boot order points at
   test-install.sh          # headless QEMU + installer CLI
+  place-in-home.sh         # copy a built file into the installed system's aelum home (boots/reuses the live session)
   test-all.sh              # the matrix + summary
   verify-installed.sh      # post-install inspection, inside the guest
   demo-snapshots.sh  menu-shots.sh  menu-shots.py  qemu-mon.py  uefi-vars.py

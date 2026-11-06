@@ -145,7 +145,7 @@ else
     # included) stays byte-identical for the disk runs that follow, and OVMF
     # boots from the edited order.
     log "Promoting the ISO's DVD entry in BootOrder so this run boots the ISO, not the installed disk ..."
-    python3 "$PROFILE_DIR/scripts/uefi-vars.py" "$OVMF_VARS" promote "QEMU DVD-ROM" \
+    "$PROFILE_DIR/scripts/boot-target.sh" iso \
         || log "WARN: could not promote the ISO entry in $OVMF_VARS; the VM may boot the installed disk (make run-clean resets the NVRAM)"
 fi
 
