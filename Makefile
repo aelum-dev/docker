@@ -14,6 +14,15 @@ endif
 HOST_UID := $(shell id -u)
 HOST_GID := $(shell id -g)
 
+# The container must share the host's calendar day. live-iso/profiledef.sh names
+# the ISO after the date the *build* computes, while release.sh tags it with the
+# date the *host* sees; a container on UTC puts an ISO built after local
+# midnight one day behind its own tag. Derive the host zone from /etc/localtime
+# (tzdata is a glibc dependency, so the image always has the zoneinfo tree);
+# an unset or unusual setup falls back to UTC, and TZ= on the command line wins.
+TZ ?= $(shell readlink -f /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')
+export TZ
+
 ## Show usage
 help:
 	@echo "Aelum docker build/run pipeline"

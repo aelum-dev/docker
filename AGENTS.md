@@ -80,6 +80,13 @@ patched go breaks wails' `go list -export` binding generation; the module pins g
 - `make image` / `make image NO_CACHE=1` — build or rebuild it.
 - `make update` — `archlinux:latest` is a rolling daily tag, so refresh the image against the newest
   Arch packages: it stops the running containers, deletes `aelum-image`, and rebuilds with `--no-cache`.
+- **The build runs on the host's timezone, not UTC.** `live-iso/profiledef.sh` derives `iso_version`
+  and `iso_label` from the date the *build* computes, while `release.sh` tags with the date the *host*
+  sees — on a UTC container an ISO built after local midnight is named one day behind its own tag
+  (`aelum-2026.11.06-x86_64.iso` published as `v2026.11.07`). The Makefile reads the host zone from
+  `/etc/localtime` and exports `TZ`; compose passes it to all three services (`TZ=` on the command
+  line wins, an unreadable zone falls back to UTC). Only the build's clock changes: the live session's
+  timezone is `airootfs/etc/localtime` (UTC) and the installer sets the target's from the region.
 
 ## QEMU (`scripts/run-iso.sh`)
 

@@ -14,6 +14,12 @@ services:
       # Host user id, so build.sh can hand the ISO back to a non-root owner
       - OUTPUT_UID=${UID:-1000}
       - OUTPUT_GID=${GID:-1000}
+      # The ISO's version string (live-iso/profiledef.sh) is the calendar date
+      # the build computes, and `make release` tags with the date the host sees.
+      # A container starts on UTC, so a build run after local midnight but
+      # before 00:xx UTC names the ISO with *yesterday's* date. The Makefile
+      # exports the host's zone; TZ= on the command line still wins.
+      - TZ=${TZ:-UTC}
     volumes:
       - ./scripts/build-iso.sh:/app/build-iso.sh:ro
       - ./output:/app/live-iso/output
@@ -28,6 +34,8 @@ services:
     tty: true
     stdin_open: true
     entrypoint: ["/bin/bash"]
+    environment:
+      - TZ=${TZ:-UTC}
     volumes:
       - ./scripts/build-iso.sh:/app/build-iso.sh:ro
       - ./output:/app/live-iso/output
@@ -50,6 +58,7 @@ services:
     environment:
       - OUTPUT_UID=${OUTPUT_UID:-1000}
       - OUTPUT_GID=${OUTPUT_GID:-1000}
+      - TZ=${TZ:-UTC}
       - SKIP_REPO_CLONE=1
       - CHOWN_WORKTREES=1
       # The mounted repos are owned by the host user while the container runs

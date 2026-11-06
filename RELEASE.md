@@ -73,6 +73,11 @@ make release VERSION=2026.10.4   # pin the tag
 make release ISO=output/foo.iso   # release a specific ISO
 ```
 
+The tag defaults to today's date here, and the ISO's own version string is computed by the
+build container, which follows this machine's timezone (docker/AGENTS.md → Toolchain image) — so
+the two agree even for a build run just after local midnight. Pin the tag with `VERSION=` if they
+ever disagree.
+
 This runs, in order:
 
 1. `scripts/sign-iso.sh` — sign + checksum the ISO (imports the private key
