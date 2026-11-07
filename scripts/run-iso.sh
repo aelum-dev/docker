@@ -109,7 +109,7 @@ QEMU_ARGS=(
     -enable-kvm
     -cpu host
     -smp 4,sockets=1,cores=4,threads=1
-    -m 4G
+    -m 2G
     -machine q35
     -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE"
     -drive if=pflash,format=raw,file="$OVMF_VARS"
