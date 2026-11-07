@@ -383,6 +383,12 @@ check "the input method session unit is installed" \
     test -f "$MNT/etc/systemd/user/aelum-fcitx5.service"
 check "the session unit is gated on the binary" \
     grep -q 'ConditionPathExists=/usr/bin/fcitx5' "$MNT/etc/systemd/user/aelum-fcitx5.service"
+# The tray's "Restart" is exit(0) plus a forked `fcitx5 -r` replacement, which the
+# unit's own stop kills with the cgroup; a duplicate bus name is the same clean
+# exit 0. Only Restart=always survives either - on-failure turns the button into
+# "Exit" and leaves the session without an input method.
+check "the session unit restarts on a clean exit too" \
+    grep -q 'Restart=always' "$MNT/etc/systemd/user/aelum-fcitx5.service"
 # Pulled in per-home like dms.service and the snapshot prompt: the wants link
 # is seeded, not enabled system-side.
 check "the unit is pulled into every seeded home" \
