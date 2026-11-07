@@ -672,6 +672,121 @@ done
 check "the installed system is given a color-scheme before Dux Shell runs" \
     grep -qE "^color-scheme='(prefer-dark|prefer-light)'$" "$MNT/etc/dconf/db/local.d/03-dark-theme"
 
+# ── The weather location ──────────────────────────────────────────────────────
+section "weather location"
+# The location chosen on the Welcome page decides one more thing about the desktop:
+# the place its weather widget reports. A country is not a place the weather can
+# be, so the installer names its capital — installer/users/weather.go writes the two
+# keys into the Dux Shell session state the seeded skeleton carries, and the greeter
+# reads the same file through the symlink the greetd setup makes.
+#
+# weather_city_for mirrors shared.WeatherByISO row for row: TestWeatherForRegion
+# holds the Go table (every location the installer offers has a capital, in the
+# format Dux Shell parses) and this holds the installed disk against it, so a
+# capital added on the Go side without a row here fails here rather than quietly.
+# The coordinates are checked as a shape instead of row by row — a pair of numbers,
+# and not Dux Shell's own default — because the failure that reaches a person is a
+# widget pointing at New York, not the seventh decimal of the city they chose.
+weather_city_for() {
+    case "$1" in
+        al) printf 'Tirana\n' ;;
+        ar) printf 'Buenos Aires\n' ;;
+        am) printf 'Yerevan\n' ;;
+        au) printf 'Canberra\n' ;;
+        at) printf 'Vienna\n' ;;
+        az) printf 'Baku\n' ;;
+        bd) printf 'Dhaka\n' ;;
+        be) printf 'Brussels\n' ;;
+        br) printf 'Brasília\n' ;;
+        bg) printf 'Sofia\n' ;;
+        kh) printf 'Phnom Penh\n' ;;
+        ca) printf 'Ottawa\n' ;;
+        cl) printf 'Santiago\n' ;;
+        cn) printf 'Beijing\n' ;;
+        co) printf 'Bogotá\n' ;;
+        cz) printf 'Prague\n' ;;
+        dk) printf 'Copenhagen\n' ;;
+        ec) printf 'Quito\n' ;;
+        ee) printf 'Tallinn\n' ;;
+        fi) printf 'Helsinki\n' ;;
+        fr) printf 'Paris\n' ;;
+        ge) printf 'Tbilisi\n' ;;
+        de) printf 'Berlin\n' ;;
+        gr) printf 'Athens\n' ;;
+        hk) printf 'Hong Kong\n' ;;
+        hu) printf 'Budapest\n' ;;
+        is) printf 'Reykjavík\n' ;;
+        in) printf 'New Delhi\n' ;;
+        id) printf 'Jakarta\n' ;;
+        ir) printf 'Tehran\n' ;;
+        il) printf 'Jerusalem\n' ;;
+        it) printf 'Rome\n' ;;
+        jp) printf 'Tokyo\n' ;;
+        kz) printf 'Astana\n' ;;
+        ke) printf 'Nairobi\n' ;;
+        lv) printf 'Riga\n' ;;
+        lt) printf 'Vilnius\n' ;;
+        lu) printf 'Luxembourg\n' ;;
+        my) printf 'Kuala Lumpur\n' ;;
+        mu) printf 'Port Louis\n' ;;
+        mx) printf 'Mexico City\n' ;;
+        md) printf 'Chișinău\n' ;;
+        ma) printf 'Rabat\n' ;;
+        np) printf 'Kathmandu\n' ;;
+        nl) printf 'Amsterdam\n' ;;
+        nc) printf 'Nouméa\n' ;;
+        nz) printf 'Wellington\n' ;;
+        mk) printf 'Skopje\n' ;;
+        no) printf 'Oslo\n' ;;
+        pl) printf 'Warsaw\n' ;;
+        pt) printf 'Lisbon\n' ;;
+        ro) printf 'Bucharest\n' ;;
+        ru) printf 'Moscow\n' ;;
+        sa) printf 'Riyadh\n' ;;
+        rs) printf 'Belgrade\n' ;;
+        sg) printf 'Singapore\n' ;;
+        sk) printf 'Bratislava\n' ;;
+        si) printf 'Ljubljana\n' ;;
+        za) printf 'Pretoria\n' ;;
+        kr) printf 'Seoul\n' ;;
+        es) printf 'Madrid\n' ;;
+        se) printf 'Stockholm\n' ;;
+        ch) printf 'Bern\n' ;;
+        tw) printf 'Taipei\n' ;;
+        th) printf 'Bangkok\n' ;;
+        tn) printf 'Tunis\n' ;;
+        tr) printf 'Ankara\n' ;;
+        ua) printf 'Kyiv\n' ;;
+        ae) printf 'Abu Dhabi\n' ;;
+        gb) printf 'London\n' ;;
+        us) printf 'Washington, D.C.\n' ;;
+        uz) printf 'Tashkent\n' ;;
+        vn) printf 'Hanoi\n' ;;
+        *) printf '\n' ;;
+    esac
+}
+# ime_region is the location the install actually ran with: --region, or the country
+# of --language, which is the CLI's own default.
+dms_session="$MNT/etc/skel/.local/state/dms/session.json"
+want_weather="$(weather_city_for "$ime_region")"
+got_weather="$(json_value "$dms_session" weatherLocation)"
+got_coords="$(json_value "$dms_session" weatherCoordinates)"
+if [ -n "$want_weather" ]; then
+    check "the seeded desktop names the weather location of ${ime_region:-none}" \
+        test "$got_weather" = "$want_weather"
+    # The coordinates are the half that decides the forecast: Dux Shell only trusts
+    # the configured name and skips geocoding when both keys are set.
+    check "the weather coordinates are a latitude,longitude pair" \
+        bash -c 'printf %s "$1" | grep -qE "^-?[0-9]+(\.[0-9]+)?,-?[0-9]+(\.[0-9]+)?$"' _ "$got_coords"
+    check "the desktop is not left on Dux Shell's own default location" \
+        test "$got_coords" != "40.7128,-74.0060"
+else
+    # No country, no capital: the worldwide location gets no weather location, and the
+    # desktop's own default is the right answer for a machine nobody placed on a map.
+    check "a worldwide install writes no weather location" \
+        bash -c '[ -z "$1" ] && [ -z "$2" ]' _ "$got_weather" "$got_coords"
+fi
+
 # ── Snapshots (snapper) ───────────────────────────────────────────────────────
 # The installer configures snapper for the btrfs layout only: separate
 # subvolumes are what make a snapshot of @ cheap, and an ext4 install has no
