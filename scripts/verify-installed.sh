@@ -19,6 +19,12 @@
 #                              CLI's en_US default). Drives the input method
 #                              addon expectations: an IME language's install
 #                              must carry its engine set.
+#   REGION      empty | ua | ru | de | …
+#                              the --region the install ran with (empty = the
+#                              CLI's default, the country of --language). Drives
+#                              the input method *layout* expectation: the second
+#                              input method every session offers is the keyboard
+#                              of that location, beside English.
 #   INPUT_METHOD empty | none  the --input-method the install was forced with
 #                              (none = no engine addons for any language)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
@@ -40,6 +46,7 @@ LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 LVM="${LVM:-0}"
 GPU_DRIVER="${GPU_DRIVER:-}"
 LANGUAGE="${LANGUAGE:-}"
+REGION="${REGION:-}"
 INPUT_METHOD="${INPUT_METHOD:-}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
 
@@ -438,6 +445,98 @@ if [ -z "$want_addons" ]; then
     }
     check "no engine addon for a language typed through keyboard layouts" no_ime_addons
 fi
+# Having the engine installed is only half of it: a first-run framework would
+# offer one input method, keyboard-us, whatever the machine's language. The
+# configure step writes the list itself (installer configure/inputmethod.go), and
+# this is the half a user feels — English first, their own language second, one
+# key between them.
+#
+# region_for_language / xkb_layout_for / ime_engines_for mirror the installer's
+# tables. TestXkbLayoutForRegion and TestSessionInputMethods hold those tables and
+# this holds the disk against them; adding a row to the Go table without adding it
+# here fails loudly here, not quietly. xkb_layout_for is three lines rather than
+# forty-six because most countries' xkeyboard-config layout is their own ISO code —
+# the exceptions are the ones the Go table calls out (Latin America is `latam`, not
+# `es`; New Caledonia is `fr`; Moldova's keyboards carry the Romanian layout).
+region_for_language() {
+    case "$1" in
+        *_*) printf '%s\n' "${1##*_}" | tr '[:upper:]' '[:lower:]' ;;
+        *)   printf '\n' ;;
+    esac
+}
+xkb_layout_for() {
+    local code="$1"
+    case "$code" in
+        ar|cl|co|ec|mx) printf 'latam\n' ;;
+        nc) printf 'fr\n' ;;
+        md) printf 'ro\n' ;;
+        at|be|bg|br|ca|ch|cz|de|dk|ee|es|fi|fr|gb|ge|gr|hu|il|is|it|jp|kr|kz|lt|lv|mk|nl|no|pl|pt|ro|rs|ru|se|si|sk|th|tr|ua) printf '%s\n' "$code" ;;
+        *) printf '\n' ;;
+    esac
+}
+ime_engines_for() {
+    case "$1" in
+        zh_CN) printf 'pinyin\n' ;;
+        zh_TW) printf 'chewing\n' ;;
+        ja_JP) printf 'mozc\n' ;;
+        ko_KR) printf 'hangul\n' ;;
+        vi_VN) printf 'bamboo\n' ;;
+        *)     printf '\n' ;;
+    esac
+}
+# profile_items lists the Name= values inside the framework's Items sections, in
+# order — the order is the feature, not an incidental of the file.
+profile_items() {
+    awk '/^\[Groups\/0\/Items\// { initems = 1; next }
+         /^\[/ { initems = 0 }
+         initems && index($0, "Name=") == 1 { sub(/^Name=/, ""); print }' "$1"
+}
+# profile_value reads one key out of one section.
+profile_value() {
+    awk -v want="[$2]" -v key="$3" '
+        $0 == want { insec = 1; next }
+        /^\[/ { insec = 0 }
+        insec && index($0, key "=") == 1 { sub("^" key "=", ""); print; exit }' "$1"
+}
+ime_language="${LANGUAGE:-en_US}"
+ime_region="${REGION:-$(region_for_language "$ime_language")}"
+want_im="keyboard-us"
+ime_layout="$(xkb_layout_for "$ime_region")"
+if [ -n "$ime_layout" ] && [ "$ime_layout" != "us" ]; then
+    want_im="$want_im keyboard-$ime_layout"
+fi
+if [ "$INPUT_METHOD" != "none" ]; then
+    ime_engine="$(ime_engines_for "$ime_language")"
+    [ -n "$ime_engine" ] && want_im="$want_im $ime_engine"
+fi
+ime_profile="$MNT/etc/xdg/fcitx5/profile"
+ime_config="$MNT/etc/xdg/fcitx5/config"
+check "the session input method list is on disk" test -f "$ime_profile"
+got_im="$(profile_items "$ime_profile" | tr '\n' ' ')"; got_im="${got_im% }"
+check "language ${ime_language} in ${ime_region:-none} offers exactly: $want_im" \
+    test "$got_im" = "$want_im"
+# English first is what makes "no input method active" mean the plain keyboard:
+# the framework serves an inactive context the first entry of the group.
+check "English is the first input method" \
+    test "$(printf '%s\n' "$got_im" | cut -d' ' -f1)" = "keyboard-us"
+# DefaultIM is the entry the switch key reaches, so it is the local one; a profile
+# that got this backwards would switch people out of their own language.
+check "the switch key reaches the local input method, not English" \
+    test "$(profile_value "$ime_profile" "Groups/0" "DefaultIM")" = \
+         "$(printf '%s\n' "$want_im" | awk '{print $NF}')"
+# The layout a disabled context falls back to — a password field — stays English,
+# which is what makes a passphrase type the same at the greeter as in the session.
+check "a disabled context keeps the English layout" \
+    test "$(profile_value "$ime_profile" "Groups/0" "Default Layout")" = "us"
+# The key itself. It is spelled with the Shift keysym because the framework's
+# parser only recognises "Shift+" with a trailing plus, so a bare trailing
+# "Shift" is dropped and the key silently becomes Alt alone.
+check "the framework's config puts the switch on Alt+Shift" \
+    bash -c 'grep -q "^0=Alt+Shift_L" "$1" && grep -q "^1=Alt+Shift_R" "$1"' _ "$ime_config"
+# …and the compositor does not also act on it. With both, one press would move
+# the XKB layout and the session's input method at the same time.
+check "the seeded session leaves layout switching to the framework" \
+    bash -c '! grep -qE "^[[:space:]]*kb_options" "$1/etc/skel/.config/hypr/hyprland.lua"' _ "$MNT"
 # The install resolves every package through the live session's [aelum-offline]
 # repository (`pacstrap -K` copies no pacman.conf and uses the live one), and
 # pacman writes the database it resolved from under the --root it was given.

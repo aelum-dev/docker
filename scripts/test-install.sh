@@ -33,6 +33,13 @@
 #               the CLI's en_US. INPUT_METHOD=none forces no addons (--input-
 #               method) — the escape hatch for proving the core-only path.
 #
+#               REGION=ua (or ru, de, jp, …) install in that location (adds
+#               --region). It drives the keyboard half of the input method list:
+#               the location's layout is the second input method every session
+#               offers beside English, so a LANGUAGE=ru_RU REGION=ru run is what
+#               proves the Russian pair actually lands on the disk. Empty
+#               (default) keeps the CLI's default, the country of --language.
+#
 #               VERIFY=0 skip the post-install inspection of the installed system
 #               (verify-installed.sh runs it by default when VERIFY=1).
 #
@@ -70,6 +77,7 @@ LUKS_PASS="${LUKS_PASS:-aelum-luks}"       # passphrase for the LUKS root partit
 LVM="${LVM:-0}"                            # root (and ext4 home) on LVM logical volumes: 0 | 1
 GPU_DRIVER="${GPU_DRIVER:-}"              # force the GPU driver set (auto|amd|intel|nvidia|mesa); empty = no flag, the CLI default is auto
 LANGUAGE="${LANGUAGE:-}"                 # install language (en_US, zh_CN, ja_JP, …); empty = no flag, the CLI default. Drives the input method addon table.
+REGION="${REGION:-}"                     # install location (ua, ru, de, jp, …); empty = no flag, the CLI default (the country of --language). Drives the input method layout.
 INPUT_METHOD="${INPUT_METHOD:-}"         # force the input method addon set (auto|none); empty = no flag, the CLI default is auto
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
@@ -323,6 +331,9 @@ fi
 if [ -n "$LANGUAGE" ]; then
     INSTALLER_ARGS+=(--language "$LANGUAGE")
 fi
+if [ -n "$REGION" ]; then
+    INSTALLER_ARGS+=(--region "$REGION")
+fi
 if [ -n "$INPUT_METHOD" ]; then
     INSTALLER_ARGS+=(--input-method "$INPUT_METHOD")
 fi
@@ -335,7 +346,7 @@ if [ "$MANUAL" = "1" ]; then
     INSTALLER_ARGS+=(--manual-layout "'$MANUAL_LAYOUT'")
 fi
 
-log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL gpu=${GPU_DRIVER:-auto} lang=${LANGUAGE:-default} im=${INPUT_METHOD:-auto})"
+log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL gpu=${GPU_DRIVER:-auto} lang=${LANGUAGE:-default} region=${REGION:-default} im=${INPUT_METHOD:-auto})"
 if [ "$LUKS" = "1" ]; then
     log "LUKS encryption enabled (root partition will be LUKS2-encrypted)"
     # CLI reads the account password first, then the LUKS passphrase, both from
@@ -362,8 +373,8 @@ log "installer CLI exited 0"
 # entry match the requested combination.
 if [ "$VERIFY" = "1" ]; then
     log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
-    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q GPU_DRIVER=%q LANGUAGE=%q INPUT_METHOD=%q DISK_PATH=%q ENABLE_SSHD=1\n' \
-             "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$LVM" "$GPU_DRIVER" "$LANGUAGE" "$INPUT_METHOD" "$DISK_PATH"
+    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q GPU_DRIVER=%q LANGUAGE=%q REGION=%q INPUT_METHOD=%q DISK_PATH=%q ENABLE_SSHD=1\n' \
+             "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$LVM" "$GPU_DRIVER" "$LANGUAGE" "$REGION" "$INPUT_METHOD" "$DISK_PATH"
           cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
         log "Verification passed"

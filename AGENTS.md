@@ -138,8 +138,10 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
   `installer/build/bin/` gets tested without rebuilding the ISO (`SHARED_INSTALLER=1`).
 - Knobs: `MODE` `USERNAME` `USER_PASS` `ROOT_PASS` `LUKS_PASS` `SSH_PORT` `DISK_PATH` `FILESYSTEM`
   `LUKS` `LVM` `MANUAL` `VERIFY` `ISO` `SHARED_DIR` `QEMU_QVM` `QEMU_EXTRA` `GPU_DRIVER`
-  `LANGUAGE` `INPUT_METHOD`. `LANGUAGE=zh_CN` (or `ja_JP`, `ko_KR`, `vi_VN`, `zh_TW`) installs as
+  `LANGUAGE` `REGION` `INPUT_METHOD`. `LANGUAGE=zh_CN` (or `ja_JP`, `ko_KR`, `vi_VN`, `zh_TW`) installs as
   that language and `verify-installed.sh` then asserts that language's input method engine set;
+  `REGION=ru` (an ISO code) installs in that location — `LANGUAGE=ru_RU REGION=ru` is the leg that
+  proves the keyboard pair (English + `keyboard-ru`) lands on the disk;
   `INPUT_METHOD=none` proves the core-only path for an IME language.
 - `make test` = the full matrix `MODES` × `FILESYSTEMS` × `LUKSES` × `LVMS` (16 cells), each a fresh
   boot + install + verify, then a summary. Narrow it while iterating (`LUKSES=1 make test`). A full
@@ -182,6 +184,13 @@ is checked to have **none** of that. It also proves the **input method** wiring:
 packages on every install, the session unit with its `/usr/bin/fcitx5` gate, the seeded wants link,
 the `hl.env` IM-module lines in the seeded `hyprland.lua`, the engine addons the `LANGUAGE=` asked
 for — and, for a keyboard-layout language or `INPUT_METHOD=none`, that no engine addon was pulled in.
+The **session input method list** is held against the disk too: `verify-installed.sh` mirrors the
+installer's two tables (`xkb_layout_for`/`ime_engines_for` in the script, `XkbLayoutByISO`/`imeTable`
+in Go — `TestXkbLayoutForRegion`/`TestSessionInputMethods` hold the tables themselves) and asserts
+`/etc/xdg/fcitx5/profile` names exactly English-then-the-local-one for the run's language+location,
+with `DefaultIM` on the local entry and `Default Layout=us`; that `/etc/xdg/fcitx5/config` puts the
+switch on `Alt+Shift_L`/`Alt+Shift_R`; and that the seeded session carries no `kb_options` (the key
+belongs to the framework, not the compositor).
 It also asserts the seeded session state hides the menu entries Aelum has no use for (the launcher
 lists packaged entries whatever their `NoDisplay`; `hiddenApps` is the filter for those — see
 live-iso/AGENTS.md).
