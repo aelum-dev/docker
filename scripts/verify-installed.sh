@@ -14,6 +14,13 @@
 #                              the --gpu-driver the install was forced with
 #                              (empty = the CLI's auto detection, which on the
 #                              virtio/VGA guest picks the mesa fallback set)
+#   LANGUAGE    empty | en_US | zh_CN | ja_JP | …
+#                              the --language the install ran with (empty = the
+#                              CLI's en_US default). Drives the input method
+#                              addon expectations: an IME language's install
+#                              must carry its engine set.
+#   INPUT_METHOD empty | none  the --input-method the install was forced with
+#                              (none = no engine addons for any language)
 #   DISK_PATH   target disk inside the guest (default /dev/vda)
 #   ENABLE_SSHD 0 | 1          after a *passing* verification, enable
 #                              sshd.service in the target so follow-up
@@ -32,6 +39,8 @@ LUKS="${LUKS:-0}"
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"
 LVM="${LVM:-0}"
 GPU_DRIVER="${GPU_DRIVER:-}"
+LANGUAGE="${LANGUAGE:-}"
+INPUT_METHOD="${INPUT_METHOD:-}"
 DISK_PATH="${DISK_PATH:-/dev/vda}"
 
 MNT=/mnt
@@ -354,6 +363,80 @@ else
         return "$found"
     }
     check "no NVIDIA driver package on this (non-NVIDIA) guest" no_nvidia_pkgs
+fi
+# The desktop set also carries the Fcitx5 input method core on EVERY install
+# (installer installdesktop.DesktopPackages) plus the engine addons the language
+# asked for (installdesktop/inputmethods.go) — the same always-core/chosen-extras
+# shape as the drivers. The session wiring is live-ISO source: the unit by an
+# isocopy job, the environment and the per-home pull-in with /etc/skel.
+for p in fcitx5 fcitx5-gtk fcitx5-qt fcitx5-configtool; do
+    check "the fcitx5 core $p is installed" pkg_installed "$p"
+done
+check "the input method session unit is installed" \
+    test -f "$MNT/etc/systemd/user/aelum-fcitx5.service"
+check "the session unit is gated on the binary" \
+    grep -q 'ConditionPathExists=/usr/bin/fcitx5' "$MNT/etc/systemd/user/aelum-fcitx5.service"
+# Pulled in per-home like dms.service and the snapshot prompt: the wants link
+# is seeded, not enabled system-side.
+check "the unit is pulled into every seeded home" \
+    bash -c 'test -L "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-fcitx5.service" &&
+             [ "$(readlink "$1/etc/skel/.config/systemd/user/hyprland-session.target.wants/aelum-fcitx5.service")" = "/etc/systemd/user/aelum-fcitx5.service" ]' \
+        _ "$MNT"
+# Qt and XWayland clients need the module selectors. GTK_IM_MODULE must NOT be
+# set: Hyprland implements the Wayland input-method protocol, so a native GTK
+# client composes through that, and a set GTK_IM_MODULE makes fcitx5 post a
+# first-login advisory asking for it to be unset. Measured on this kind of
+# install: Pinyin preedit and the candidate window worked in GNOME Text Editor
+# (GTK4) and in Firefox's URL bar (GTK3) with the variable unset.
+check "the session config names the IM modules its clients need" \
+    bash -c 'grep -qF "hl.env(\"QT_IM_MODULE\", \"fcitx\")" "$1/etc/skel/.config/hypr/hyprland.lua" &&
+             grep -qF "hl.env(\"XMODIFIERS\", \"@im=fcitx\")" "$1/etc/skel/.config/hypr/hyprland.lua" &&
+             ! grep -qF "hl.env(\"GTK_IM_MODULE\"" "$1/etc/skel/.config/hypr/hyprland.lua"' \
+        _ "$MNT"
+# The fcitx5 package ships /etc/xdg/autostart/org.fcitx.Fcitx5.desktop and the
+# session launcher runs it, which would start a second framework and leave the
+# unit above reading "inactive (dead)" beside a running daemon. The seeded
+# per-home override is the desktop-entry spec's way of turning it off.
+check "the packaged autostart entry is turned off in every seeded home" \
+    bash -c 'grep -q "^Hidden=true" "$1/etc/skel/.config/autostart/org.fcitx.Fcitx5.desktop"' \
+        _ "$MNT"
+# The Dux Shell launcher lists packaged entries whatever their NoDisplay (measured: fcitx5-config-qt's
+# own NoDisplay=true entry is listed), and its only entry filter is the hiddenApps list in the seeded
+# session state, so that is where every menu entry Aelum has no use for is hidden: the Migration
+# Wizard (no Fcitx 4 to import from), the Keyboard layout viewer, and mpv, the engine the player is
+# built on. No desktop-entry overrides — one list, one mechanism.
+check "the seeded session hides the menu entries Aelum has no use for" \
+    bash -c 'for id in org.fcitx.fcitx5-migrator kbd-layout-viewer5 mpv; do
+                 grep -q "\"$id\"" "$1/etc/skel/.local/state/dms/session.json" || exit 1
+             done' \
+        _ "$MNT"
+# The engine addons follow the language. ime_addons_for mirrors the installer's
+# table — both sides are asserted against it, the Go test against the table and
+# this against the disk.
+ime_addons_for() {
+    case "$1" in
+        zh_CN) echo "fcitx5-chinese-addons" ;;
+        zh_TW) echo "fcitx5-chewing fcitx5-table-extra" ;;
+        ja_JP) echo "fcitx5-mozc" ;;
+        ko_KR) echo "fcitx5-hangul" ;;
+        vi_VN) echo "fcitx5-bamboo" ;;
+        *)     echo "" ;;
+    esac
+}
+want_addons="$(ime_addons_for "$LANGUAGE")"
+[ "$INPUT_METHOD" = "none" ] && want_addons=""
+for p in $want_addons; do
+    check "language ${LANGUAGE:-en_US} installed its engine $p" pkg_installed "$p"
+done
+if [ -z "$want_addons" ]; then
+    no_ime_addons() {
+        local p found=0
+        for p in fcitx5-chinese-addons fcitx5-chewing fcitx5-table-extra fcitx5-mozc fcitx5-hangul fcitx5-bamboo; do
+            if pkg_installed "$p"; then echo "unexpected input method engine: $p"; found=1; fi
+        done
+        return "$found"
+    }
+    check "no engine addon for a language typed through keyboard layouts" no_ime_addons
 fi
 # The install resolves every package through the live session's [aelum-offline]
 # repository (`pacstrap -K` copies no pacman.conf and uses the live one), and

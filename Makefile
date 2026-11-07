@@ -63,6 +63,7 @@ help:
 	@echo "  make test-one LUKS=1  single LUKS2-encrypted install"
 	@echo "  make test-one LVM=1   single LVM install"
 	@echo "  make test-one MANUAL=1  single manual install (formats Boot + System)"
+	@echo "  make test-one LANGUAGE=zh_CN  install as Chinese (proves the input method engine set)"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 	@echo "  make demo-snapshots   Put 5 demo snapshots on the test disk (needs test-boot running)"
 	@echo "  make snapshot-rollback  Boot a snapshot -> snapper rollback -> reboot -> assert (needs an install on the test disk)"
@@ -261,7 +262,7 @@ test: test-matrix
 test-one:
 	@MODE=auto \
 	 FILESYSTEM="$(FILESYSTEM)" LUKS="$(LUKS)" LVM="$(LVM)" MANUAL="$(MANUAL)" \
-	 GPU_DRIVER="$(GPU_DRIVER)" \
+	 GPU_DRIVER="$(GPU_DRIVER)" LANGUAGE="$(LANGUAGE)" INPUT_METHOD="$(INPUT_METHOD)" \
 	 VERIFY="$(VERIFY)" SHARED_INSTALLER="$(SHARED_INSTALLER)" \
 	 LUKS_PASS="$(LUKS_PASS)" USER_PASS="$(USER_PASS)" \
 	 USERNAME="$(USERNAME)" SSH_PORT="$(SSH_PORT)" \

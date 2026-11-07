@@ -25,6 +25,14 @@
 #               the offline mirror. Empty (default) keeps the CLI's auto
 #               detection, which on this guest picks the mesa fallback set.
 #
+#               LANGUAGE=zh_CN (or ja_JP, ko_KR, …) install as that language
+#               (adds --language). It drives the input method addon table: a
+#               zh/ja/ko/vi run proves the chosen engine set resolves from the
+#               offline mirror, and verify-installed.sh asserts the installed
+#               system carries it plus the session wiring. Empty (default) keeps
+#               the CLI's en_US. INPUT_METHOD=none forces no addons (--input-
+#               method) — the escape hatch for proving the core-only path.
+#
 #               VERIFY=0 skip the post-install inspection of the installed system
 #               (verify-installed.sh runs it by default when VERIFY=1).
 #
@@ -61,6 +69,8 @@ LUKS="${LUKS:-0}"                          # encrypt root with LUKS2 in auto ins
 LUKS_PASS="${LUKS_PASS:-aelum-luks}"       # passphrase for the LUKS root partition (LUKS=1)
 LVM="${LVM:-0}"                            # root (and ext4 home) on LVM logical volumes: 0 | 1
 GPU_DRIVER="${GPU_DRIVER:-}"              # force the GPU driver set (auto|amd|intel|nvidia|mesa); empty = no flag, the CLI default is auto
+LANGUAGE="${LANGUAGE:-}"                 # install language (en_US, zh_CN, ja_JP, …); empty = no flag, the CLI default. Drives the input method addon table.
+INPUT_METHOD="${INPUT_METHOD:-}"         # force the input method addon set (auto|none); empty = no flag, the CLI default is auto
 SSH_PORT="${SSH_PORT:-2222}"               # host port forwarded to guest :22
 DISK_PATH="${DISK_PATH:-/dev/vda}"         # disk path *inside* the guest
 FILESYSTEM="${FILESYSTEM:-btrfs}"          # root fs for auto install: ext4 | btrfs
@@ -310,6 +320,12 @@ fi
 if [ -n "$GPU_DRIVER" ]; then
     INSTALLER_ARGS+=(--gpu-driver "$GPU_DRIVER")
 fi
+if [ -n "$LANGUAGE" ]; then
+    INSTALLER_ARGS+=(--language "$LANGUAGE")
+fi
+if [ -n "$INPUT_METHOD" ]; then
+    INSTALLER_ARGS+=(--input-method "$INPUT_METHOD")
+fi
 if [ "$MANUAL" = "1" ]; then
     MANUAL_LAYOUT="$(build_manual_layout)"
     [ -n "$MANUAL_LAYOUT" ] || fail "could not build a manual layout for $DISK_PATH"
@@ -319,7 +335,7 @@ if [ "$MANUAL" = "1" ]; then
     INSTALLER_ARGS+=(--manual-layout "'$MANUAL_LAYOUT'")
 fi
 
-log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL gpu=${GPU_DRIVER:-auto})"
+log "Running installer install on $DISK_PATH (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL gpu=${GPU_DRIVER:-auto} lang=${LANGUAGE:-default} im=${INPUT_METHOD:-auto})"
 if [ "$LUKS" = "1" ]; then
     log "LUKS encryption enabled (root partition will be LUKS2-encrypted)"
     # CLI reads the account password first, then the LUKS passphrase, both from
@@ -346,8 +362,8 @@ log "installer CLI exited 0"
 # entry match the requested combination.
 if [ "$VERIFY" = "1" ]; then
     log "Verifying the installed system (fs=$FILESYSTEM luks=$LUKS lvm=$LVM manual=$MANUAL) ..."
-    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q GPU_DRIVER=%q DISK_PATH=%q ENABLE_SSHD=1\n' \
-             "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$LVM" "$GPU_DRIVER" "$DISK_PATH"
+    if { printf 'FILESYSTEM=%q LUKS=%q LUKS_PASS=%q LVM=%q GPU_DRIVER=%q LANGUAGE=%q INPUT_METHOD=%q DISK_PATH=%q ENABLE_SSHD=1\n' \
+             "$FILESYSTEM" "$LUKS" "$LUKS_PASS" "$LVM" "$GPU_DRIVER" "$LANGUAGE" "$INPUT_METHOD" "$DISK_PATH"
           cat "$PROFILE_DIR/scripts/verify-installed.sh"; } \
         | sshpass -p "$ROOT_PASS" ssh "${SSH_OPTS[@]}" "root@localhost" "bash -s"; then
         log "Verification passed"
