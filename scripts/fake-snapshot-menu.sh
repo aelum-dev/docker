@@ -334,7 +334,7 @@ check "the pre snapshot is still listed after a dozen timestamps" \
     grep -qE 'submenuentry "Snapshot 4 - 10/27/26 11:00 AM - pre"' "$FRAGMENT"
 check "the post snapshot is still listed too" \
     grep -qE 'submenuentry "Snapshot 5 - 10/27/26 11:04 AM - post"' "$FRAGMENT"
-want_count 8 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count (the bounded list stays bounded)"
+want_count 18 '^[[:space:]]*submenuentry ' "$FRAGMENT" "submenuentry count (the whole history is listed - the submenu scrolls)"
 
 echo "== with no pre snapshot the entry is the important one =="
 # The second rung: a rollback backup, or the "after installation" state of a
