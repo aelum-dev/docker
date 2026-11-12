@@ -155,12 +155,19 @@ if ! grep -q '^\[multilib\]' /tmp/pacman-build.conf; then
     printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /tmp/pacman-build.conf
 fi
 
+# [aelum] comes BEFORE the Include on purpose: measured with pacman 7.1, when a
+# package name exists in two enabled repositories the one listed FIRST in the
+# config wins even against a higher version elsewhere. refind is the live case
+# (extra carries 0.14.2-3, [aelum] our patched 0.14.2-4): appended after the
+# Include, the resolution — and the ISO — got extra's. Ahead of it, the
+# offline mirror carries ours, and the installed system resolves ours too (the
+# installer writes the same order into the target's pacman.conf).
 cat > /tmp/build-pacman.conf <<'EOF'
-Include = /tmp/pacman-build.conf
-
 [aelum]
 Server = https://cdn.aelum.dev/repo/$arch
 SigLevel = Never
+
+Include = /tmp/pacman-build.conf
 EOF
 
 echo "Downloading official packages..."
