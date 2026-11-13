@@ -416,10 +416,12 @@ check "the packaged autostart entry is turned off in every seeded home" \
 # The Dux Shell launcher lists packaged entries whatever their NoDisplay (measured: fcitx5-config-qt's
 # own NoDisplay=true entry is listed), and its only entry filter is the hiddenApps list in the seeded
 # session state, so that is where every menu entry Aelum has no use for is hidden: the Migration
-# Wizard (no Fcitx 4 to import from), the Keyboard layout viewer, and mpv, the engine the player is
-# built on. No desktop-entry overrides — one list, one mechanism.
+# Wizard (no Fcitx 4 to import from), the Keyboard layout viewer, mpv, the engine the player is
+# built on, and the two extra entries the terminal ships — foot-server (the daemon) and footclient
+# (a window in a running daemon); Aelum starts plain foot, so only that one is a thing to launch.
+# No desktop-entry overrides — one list, one mechanism.
 check "the seeded session hides the menu entries Aelum has no use for" \
-    bash -c 'for id in org.fcitx.fcitx5-migrator kbd-layout-viewer5 mpv; do
+    bash -c 'for id in org.fcitx.fcitx5-migrator kbd-layout-viewer5 mpv foot-server footclient; do
                  grep -q "\"$id\"" "$1/etc/skel/.local/state/dms/session.json" || exit 1
              done' \
         _ "$MNT"
@@ -636,6 +638,38 @@ imports_exist() {
     done < <(grep -o '@import[^;]*' "$1" | tr "'" '"' | sed -n 's/.*"\([^"]*\)".*/\1/p')
     return "$missing"
 }
+# foot_palette_is_mode "<dank-colors.ini>" <dark|light> — foot reads the palette of
+# the theme it starts in, which is colors-dark unless its config says otherwise, and
+# the desktop starts in the seeded mode. So the seeded file has to carry the seeded
+# mode's background **in that section**: a light palette under a dark section puts
+# foot's own colours on a dark first terminal, the same mismatch palette_is_mode is
+# for GTK.
+foot_palette_is_mode() {
+    awk -v mode="$2" '
+        /^\[/ { section = $0 }
+        section == "[colors-" mode "]" && /^[[:space:]]*background[[:space:]]*=/ {
+            seen = 1
+            sub(/^[^=]*=/, "")
+            v = $0
+            r = strtonum("0x" substr(v, 1, 2)); g = strtonum("0x" substr(v, 3, 2)); b = strtonum("0x" substr(v, 5, 2))
+            lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+            dark = mode == "dark"
+            good = (dark && lum < 0.5) || (!dark && lum > 0.5)
+        }
+        END { if (!seen || !good) exit 1 }' "$1"
+}
+
+# foot_include_exists "<mount>" — the seeded foot.ini reads its palette through an
+# include of the generated file, written as a path under the home. An include naming
+# nothing is dead config plus a warning on every terminal start.
+foot_include_exists() {
+    local mnt="$1" inc
+    inc="$(sed -n 's/^include=//p' "$mnt/etc/skel/.config/foot/foot.ini" | head -1)"
+    case "$inc" in
+        "~/"*) test -e "$mnt/etc/skel/${inc:2}" ;;
+        *) false ;;
+    esac
+}
 
 seed_mode="$(seeded_mode "$MNT/etc/skel/.cache/dms/dms-colors.json")"
 check "the seeded session declares a mode" test -n "$seed_mode"
@@ -650,6 +684,16 @@ done
 check "a GTK3 app is led to the seeded palette" \
     bash -c '[ -L "$1/etc/skel/.config/gtk-3.0/gtk.css" ] &&
              [ "$(readlink "$1/etc/skel/.config/gtk-3.0/gtk.css")" = "dank-colors.css" ]' _ "$MNT"
+# The terminal is the same chain with two more links: the seeded foot.ini includes
+# Dux Shell's generated palette file, and that file only stays generated while the
+# foot matugen template is on. A missing include is dead config, a palette nothing
+# regenerates is the stale-palette bug under a new name, and a palette of the wrong
+# mode is foot's own colours on a dark first terminal.
+check "the seeded terminal is led to the seeded palette" foot_include_exists "$MNT"
+check "the seeded terminal palette is the palette of the seeded mode" \
+    foot_palette_is_mode "$MNT/etc/skel/.config/foot/dank-colors.ini" "$seed_mode"
+check "the seeded session keeps the terminal palette generated" \
+    bash -c 'grep -q "\"matugenTemplateFoot\": *true" "$1/etc/skel/.config/dms/settings.json"' _ "$MNT"
 
 # The icon theme three places name, and Dux Shell is the only one that changes it
 # per mode: it must start on the variant the session starts in.

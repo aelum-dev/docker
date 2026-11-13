@@ -192,7 +192,8 @@ with `DefaultIM` on the local entry and `Default Layout=us`; that `/etc/xdg/fcit
 switch on `Alt+Shift_L`/`Alt+Shift_R`; and that the seeded session carries no `kb_options` (the key
 belongs to the framework, not the compositor).
 It also asserts the seeded session state hides the menu entries Aelum has no use for (the launcher
-lists packaged entries whatever their `NoDisplay`; `hiddenApps` is the filter for those — see
+lists packaged entries whatever their `NoDisplay`; `hiddenApps` is the filter for those, and it carries
+`foot-server` and `footclient` beside the fcitx5-configtool entries and `mpv` — see
 live-iso/AGENTS.md).
 `VERIFY=0` skips it.
 
