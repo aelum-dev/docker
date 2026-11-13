@@ -296,13 +296,15 @@ run-disk:
 # has something to show. The live ISO has to be running (test-boot); the script
 # itself is copied into shared/, which the guest mounts at /shared.
 SSH_PORT ?= 2222
-DEMO_FLAGS := $(if $(filter 1,$(RESET)),--reset,)
+DEMO_FLAGS := $(if $(filter 1,$(RESET)),--reset,)$(if $(EXTRA), --extra $(EXTRA),)
 
 ## demo-snapshots: create 5 demo snapshots in the installed system on the test disk,
 ##       make sure its firmware entry exists, then power the VM off so
 ##       `make run-disk` can boot into that menu.
 ##   make test-boot && make demo-snapshots && make run-disk
 ##   make demo-snapshots RESET=1     delete the existing snapshots first
+##   make demo-snapshots EXTRA=40    …and 40 plain ones on top, enough to overflow
+##       the submenu — the shape that shows the menu's own layout (menu-shots.sh)
 demo-snapshots:
 	@if ! pgrep -f "qemu-system-x86_64.*[v]disk.qcow2" >/dev/null 2>&1; then \
 		echo "Start the test VM first:  make -C docker test-boot"; exit 1; \
@@ -321,6 +323,10 @@ demo-snapshots:
 # pointed at in the boot order for run-disk.
 ## install-pkg: install a built .pkg.tar.zst into the system on the test disk
 ##   make install-pkg PKG=../package-installer/dist/aelum-package-installer-0.5.9-2-x86_64.pkg.tar.zst
+## For `refind` specifically the upgrade alone changes nothing you can see: the firmware boots
+## the ESP's own copy, which only the installer writes (refind/AGENTS.md → "Testing a change on
+## an installed system"). Copy /usr/share/refind/refind_x64.efi to <esp>/EFI/refind/ from the
+## live ISO before re-shooting the menu.
 install-pkg:
 	@test -n "$(PKG)" || { echo "usage: make install-pkg PKG=<path to .pkg.tar.zst>"; exit 2; }
 	@./scripts/install-in-vm.sh "$(PKG)"

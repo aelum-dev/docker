@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# demo-snapshots.sh — put five snapshots on an Aelum install so the rEFInd
-# snapshot menu has something to show.
+# demo-snapshots.sh — put five snapshots (or more, with --extra) on an Aelum
+# install so the rEFInd snapshot menu has something to show.
 #
 # Run it inside the installed system, or from the live ISO against an installed
 # system mounted at /mnt:
@@ -10,6 +10,8 @@
 #                                    # aelum user is in wheel and snapper allows wheel)
 #   demo-snapshots.sh --root /mnt    # in the live ISO, with the install mounted at /mnt
 #   demo-snapshots.sh --reset        # delete every snapshot first
+#   demo-snapshots.sh --extra 40     # …and 40 plain snapshots on top of the five,
+#                                    # enough to overflow the boot menu's submenu
 #
 # The five are a realistic history, not a label demo: two pre/post pairs from a
 # package transaction, and one snapshot a person named. The menu names every one
@@ -26,11 +28,12 @@
 set -u
 
 usage() {
-    echo "usage: $(basename "$0") [--root <path>] [--reset]"
+    echo "usage: $(basename "$0") [--root <path>] [--reset] [--extra <n>]"
 }
 
 ROOT=""
 RESET=0
+EXTRA=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --root)
@@ -41,6 +44,11 @@ while [ $# -gt 0 ]; do
         --reset)
             RESET=1
             shift
+            ;;
+        --extra)
+            [ $# -ge 2 ] || { usage; exit 2; }
+            EXTRA=$2
+            shift 2
             ;;
         -h | --help)
             usage
@@ -57,6 +65,10 @@ command -v snapper >/dev/null || {
     echo "snapper is not installed. Is this a btrfs install?" >&2
     exit 1
 }
+
+case "$EXTRA" in
+    '' | *[!0-9]*) echo "--extra wants a count of snapshots" >&2; exit 2 ;;
+esac
 
 # snapper's --root is how the live ISO talks to an installed system's config; it
 # has to skip DBus, because snapperd there is not the one serving this root.
@@ -100,6 +112,18 @@ echo "=== creating 5 demo snapshots ==="
 take_pair
 take_pair
 snap create -t single -d "Before I changed the GPU driver"
+
+if [ "$EXTRA" -gt 0 ]; then
+    # Enough history to overflow the boot menu's submenu, which is what makes the
+    # menu's own layout observable: how many rows fit, where the window starts,
+    # and whether it reaches the banner's artwork. Plain single snapshots — no
+    # cleanup algorithm — and snapper's NUMBER_LIMIT applies per cleanup
+    # algorithm, so these are not the ones a limit deletes.
+    echo "=== creating $EXTRA more (plain snapshots, to overflow the menu) ==="
+    for i in $(seq 1 "$EXTRA"); do
+        snap create -t single >/dev/null || { echo "  stopped after $((i - 1))"; break; }
+    done
+fi
 
 echo
 echo "=== snapshots ==="
