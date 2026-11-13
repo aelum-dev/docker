@@ -1,7 +1,7 @@
 .PHONY: help build local-build build-local local-clean image update dev local-dev attach stop clean \
         release release-sign release-upload release-website wkd \
         run run-clean run-disk vm-clean boot-show \
-        test test-one test-boot test-matrix demo-snapshots snapshot-rollback
+        test test-one test-boot test-matrix demo-snapshots snapshot-rollback install-pkg
 
 BUILD_FLAGS:=
 ifeq ($(NO_CACHE),1)
@@ -66,6 +66,7 @@ help:
 	@echo "  make test-one LANGUAGE=zh_CN  install as Chinese (proves the input method engine set)"
 	@echo "  make test-boot        Boot headless with /shared mounted; leave VM running"
 	@echo "  make demo-snapshots   Put 5 demo snapshots on the test disk (needs test-boot running)"
+	@echo "  make install-pkg PKG=<file>  Install a built package into the system on the test disk"
 	@echo "  make snapshot-rollback  Boot a snapshot -> snapper rollback -> reboot -> assert (needs an install on the test disk)"
 
 # ===========================================================================
@@ -310,6 +311,19 @@ demo-snapshots:
 	@ssh -p $(SSH_PORT) -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost \
 		'mount /dev/vda2 /mnt || { echo "could not mount the installed system (LUKS or LVM install? mount its default subvolume yourself, then run /shared/demo-snapshots.sh --root /mnt)"; exit 1; }; mount -o subvol=@/.snapshots /dev/vda2 /mnt/.snapshots || echo "note: could not mount @/.snapshots; snapper cannot see the history"; mount /dev/vda1 /mnt/efi || echo "note: could not mount the ESP; the boot menu is left to the next boot"; /shared/demo-snapshots.sh --root /mnt $(DEMO_FLAGS); sync; umount -R /mnt; efibootmgr 2>/dev/null | sed -n "s/^Boot\([0-9]*\)\* Aelum.*/\1/p" | xargs -r -n1 -I{} sh -c "efibootmgr -b {} -D >/dev/null"; efibootmgr -c -d /dev/vda -p 1 -L Aelum -l "\\EFI\\refind\\refind_x64.efi" >/dev/null; poweroff'
 	@echo "Next:  make -C docker run-disk   (then select the snapshot icon and press F2)"
+
+# install-pkg: put a locally built package into the system installed on the test
+# disk — how an app that ships through [aelum] is smoke-tested before it is
+# published. The channel only ever serves what was published, so `pacman -S` in
+# the guest can never bring the change under test; the artifact has to be named
+# on disk. The script boots the live ISO, runs the transaction through
+# arch-chroot so the package's hooks run in the target, and leaves the disk
+# pointed at in the boot order for run-disk.
+## install-pkg: install a built .pkg.tar.zst into the system on the test disk
+##   make install-pkg PKG=../package-installer/dist/aelum-package-installer-0.5.9-2-x86_64.pkg.tar.zst
+install-pkg:
+	@test -n "$(PKG)" || { echo "usage: make install-pkg PKG=<path to .pkg.tar.zst>"; exit 2; }
+	@./scripts/install-in-vm.sh "$(PKG)"
 
 ## snapshot-rollback: the acceptance test for the snapshot feature, against the
 ##       real disk: boot a snapshot through the menu entry the installed system

@@ -37,6 +37,15 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
 `docker/vdisk.qcow2` = `/dev/vda`; the installed test system is throwaway — fix the source, rebuild
 (via `local-dev`), and re-run the test.
 
+`make install-pkg PKG=<file>` (`scripts/install-in-vm.sh`) puts a locally built app package — from
+`package-installer/`, `video-player/` or `refind/` — onto that installed system for a manual smoke
+test. It copies the artifact (plus its `.sig`) into `shared/`, boots the live ISO if none is up,
+mounts the installed root whatever its shape (plain, LUKS, LVM, LUKS under LVM — no `subvol=`, the
+default subvolume is the system), runs `pacman -U` through `arch-chroot` so the package's own hooks
+run in the target, then powers off and points the UEFI boot order at the install for `run-disk`.
+The reason it names the file: the `[aelum]` channel only ever serves what was already published, so
+`pacman -S` inside the guest can never bring the change under test.
+
 ## The pipeline (`scripts/build-iso.sh`, inside the container)
 
 1. Gets the two repos: clones them, or uses the bind-mounted local trees when `SKIP_REPO_CLONE=1`.
@@ -226,6 +235,7 @@ scripts/
   run-iso.sh               # QEMU launch (ISO or installed disk; HEADLESS/MONITOR for capture)
   boot-target.sh           # read/switch which of the two the UEFI boot order points at
   test-install.sh          # headless QEMU + installer CLI
+  install-in-vm.sh         # pacman -U a locally built package into the system on the test disk
   place-in-home.sh         # copy a built file into the installed system's aelum home (boots/reuses the live session)
   test-all.sh              # the matrix + summary
   verify-installed.sh      # post-install inspection, inside the guest
