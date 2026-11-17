@@ -109,7 +109,7 @@ Your `release.env` is the only machine‑specific file, and it is never committe
 | `scripts/sign-iso.sh` | Picks the ISO, writes SHA‑256/SHA‑512 checksums, produces a detached ASCII‑armored GPG signature, exports the public key locally (it is distributed via WKD), and **verifies everything** before printing the asset list. Imports the private key from the env for headless signing. |
 | `scripts/publish-iso.sh` | Uploads the ISO + sidecars to R2 (`public-read`), builds + uploads `latest.json`, and generates the website's `release.ts`. Builds a throwaway rclone config from the env — never touches your main `rclone.conf`. |
 | `scripts/gen-release-metadata.sh` | Turns the signed ISO into `latest.json` (R2 manifest) and `release.ts` (website module) from the same source of truth, so the two can't drift. |
-| `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the fine-grained PAT, or an SSH key as a fallback). GitHub Pages rebuilds automatically. |
+| `scripts/publish-website.sh` | Clones the website repo, overwrites `src/lib/release.ts`, and pushes to `main` (via the fine-grained PAT, else the logged-in `gh` CLI token). GitHub Pages rebuilds automatically. |
 
 ## Verifying (for users)
 

@@ -37,14 +37,13 @@ that needs root"): `make test-one …`, `make test-boot`, `make snapshot-rollbac
 `docker/vdisk.qcow2` = `/dev/vda`; the installed test system is throwaway — fix the source, rebuild
 (via `local-dev`), and re-run the test.
 
-`make install-pkg PKG=<file>` (`scripts/install-in-vm.sh`) puts a locally built app package — from
-`package-installer/`, `video-player/` or `refind/` — onto that installed system for a manual smoke
-test. It copies the artifact (plus its `.sig`) into `shared/`, boots the live ISO if none is up,
-mounts the installed root whatever its shape (plain, LUKS, LVM, LUKS under LVM — no `subvol=`, the
-default subvolume is the system), runs `pacman -U` through `arch-chroot` so the package's own hooks
-run in the target, then powers off and points the UEFI boot order at the install for `run-disk`.
-The reason it names the file: the `[aelum]` channel only ever serves what was already published, so
-`pacman -S` inside the guest can never bring the change under test.
+`make install-pkg PKG=<file>` (`scripts/install-in-vm.sh`) `pacman -U`s a locally built app package —
+from `package-installer/`, `video-player/` or `refind/` — onto that installed system for a manual
+smoke test: it boots the live ISO if none is up, mounts the installed root whatever its shape (plain,
+LUKS, LVM, LUKS under LVM — no `subvol=`, the default subvolume is the system), and runs the
+transaction through `arch-chroot` so the package's own hooks run in the target, then points the boot
+order at the install for `run-disk`. It names the file because the `[aelum]` channel only ever serves
+what was already published — `pacman -S` inside the guest can never bring the change under test.
 
 ## The pipeline (`scripts/build-iso.sh`, inside the container)
 
@@ -52,25 +51,25 @@ The reason it names the file: the `[aelum]` channel only ever serves what was al
    Either way the rest of the script works on `/app/live-iso` + `/app/installer`.
 2. Builds the installer and copies `aelum-installer{,-cli}` into `live-iso/airootfs/usr/local/bin/`.
 3. `pacman -Syw --dbpath <empty dir> --cachedir <offline cache>` — a blank DB on purpose, so only the
-   dependency trees of `packages.x86_64` **plus the installer's own package lists** are pulled, not
-   the whole world — the second set comes from `go run ./backend/scripts/pkg-list.go` in the installer
-   tree, so the mirror is exactly "what the live session runs ∪ what an install writes" and neither
-   list is duplicated by hand (live-iso/AGENTS.md → the mirror note). `pacman -S --print` then
-   records the exact files the just-synced repos resolve to. Both calls run through a generated config
-   (`Include = /etc/pacman.conf` + `[aelum]`, `SigLevel = Never` scoped to that repo), so the
-   distro's own repository resolves too and its packages (currently `aelum-video-player` and
-    `aelum-package-installer`) are baked
-   into the mirror like any other. `mkarchiso` itself never sees `[aelum]` — it installs everything
-   from the mirror, which is what keeps the live session and the mirror on the same versions.
+   dependency trees of `packages.x86_64` **plus the installer's own package lists** are pulled — the
+   second set comes from `go run ./backend/scripts/pkg-list.go`, so the mirror is exactly "what the
+   live session runs ∪ what an install writes" and neither list is duplicated by hand
+   (live-iso/AGENTS.md → the mirror note). `pacman -S --print` then records the exact files the
+   just-synced repos resolve to. Both calls run through a generated config: `[aelum]`
+   (`SigLevel = Never` scoped to that repo) **before** `Include = /etc/pacman.conf` — repository
+   order, not version, decides a shared name, and the resolution got extra's `refind` until the block
+   moved ahead of the `Include` (refind/AGENTS.md). It also enables `[multilib]`, without which the
+   `lib32-*` GPU driver candidates never resolve. `mkarchiso` itself never sees `[aelum]` — it
+   installs everything from the mirror, which is what keeps the live session and the mirror on the
+   same versions.
 4. Builds `packages.aur.x86_64` with `makepkg` as a throwaway `makepkg` user behind a local
    `[aur-local]` repo (`repo-add --prevent-downgrade`, so an older build kept in the warm PKGDEST
    can never win the DB), and resolves those names + their dependency trees the same way.
 5. **The offline mirror is rebuilt from the resolved list on every run.** The download cache and
    PKGDEST stay warm — that is what makes a rebuild cheap — but they accumulate every version ever
-   downloaded; copying them wholesale bakes that history into the ISO (repo-add keeps the newest per
-   name in the DB but never removes superseded files, and indexes its arguments in glob order, which
-   for versions like `9.3` vs `9.10` picks the older one). The mirror is emptied first, only the
-   resolved files are copied in, and its DB is built fresh.
+   downloaded, and copying them wholesale bakes that history into the ISO (`repo-add` keeps the
+   newest per name in the DB but never removes superseded files, and indexes its arguments in glob
+   order, which for versions like `9.3` vs `9.10` picks the older one).
 6. `mkarchiso -v -w work -o output -C pacman-offline.conf -m iso .` → `output/aelum-*.iso`,
    bind-mounted to the host and chowned via `OUTPUT_UID`/`OUTPUT_GID` (the Makefile passes the real
    `id -u`/`id -g`; the shell doesn't export them).
@@ -89,22 +88,23 @@ patched go breaks wails' `go list -export` binding generation; the module pins g
 - `make image` / `make image NO_CACHE=1` — build or rebuild it.
 - `make update` — `archlinux:latest` is a rolling daily tag, so refresh the image against the newest
   Arch packages: it stops the running containers, deletes `aelum-image`, and rebuilds with `--no-cache`.
-- **The build runs on the host's timezone, not UTC.** `live-iso/profiledef.sh` derives `iso_version`
-  and `iso_label` from the date the *build* computes, while `release.sh` tags with the date the *host*
-  sees — on a UTC container an ISO built after local midnight is named one day behind its own tag
+- **The build runs on the host's timezone, not UTC.** `live-iso/profiledef.sh` names the ISO after
+  the date the *build* computes, while `release.sh` tags with the date the *host* sees — on a UTC
+  container an ISO built after local midnight is named one day behind its own tag
   (`aelum-2026.11.06-x86_64.iso` published as `v2026.11.07`). The Makefile reads the host zone from
-  `/etc/localtime` and exports `TZ`; compose passes it to all three services (`TZ=` on the command
-  line wins, an unreadable zone falls back to UTC). Only the build's clock changes: the live session's
-  timezone is `airootfs/etc/localtime` (UTC) and the installer sets the target's from the region.
+  `/etc/localtime` and exports `TZ`; compose passes it to all three services. Only the build's clock
+  changes: the live session stays UTC (`airootfs/etc/localtime`) and the installer sets the target's
+  from the region.
 
 ## QEMU (`scripts/run-iso.sh`)
 
-KVM (`-cpu host`), 4 cores, 4 GB RAM, 20 G `vdisk.qcow2` as `virtio-blk-pci` (the guest sees
+KVM (`-cpu host`), 4 cores, 2 GB RAM, 20 G `vdisk.qcow2` as `virtio-blk-pci` (the guest sees
 `/dev/vda`), OVMF (`OVMF_VARS.fd`, created from the system template when missing), `../shared` mapped
-as `/shared`, user-mode networking with SSH on host port 2222. Knobs: `XRES`/`YRES`, `UI=sdl|gtk`,
-`FULLSCREEN`, `GL=0` (plain VGA), `HEADLESS=1 MONITOR=…` (no window, QEMU monitor driven +
-screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` — this is `run-disk`),
-`SHARED_DIR`, `SSH_PORT`, `QEMU_EXTRA`, `QEMU_QVM=0` (drop KVM).
+as `/shared`, user-mode networking with SSH on host port 2222 (`SSH_PORT=`, `SSH_PORT=0` drops it).
+Knobs: `XRES`/`YRES`, `UI=sdl|gtk`, `FULLSCREEN` (GTK only), `GL=0` (plain VGA),
+`HEADLESS=1 MONITOR=…` (no window, QEMU monitor driven + screenshotted), `SERIAL`,
+`BOOT_DISK=1` (boot the installed disk, no `-cdrom` — this is `run-disk`), `SHARED_DIR`.
+(`QEMU_EXTRA`/`QEMU_QVM=0` are `test-install.sh` knobs — this script takes neither.)
 
 - **`make vm-clean`** recreates `vdisk.qcow2` + `OVMF_VARS.fd`. **`make run-clean`** only drops the
   NVRAM (a corrupt `BootOrder` otherwise boots nothing).
@@ -117,9 +117,8 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
     `-cdrom` + `-boot d` boots the installed disk when an install put its entry first, and a
     `run-disk` boots the ISO when a test run promoted the DVD entry.
   - `promote` rewrites BootOrder's data in place and leaves every `Boot####` entry byte-identical, so
-    the other target stays one switch away. BootOrder is an array of **UINT16** (its size grows by 2
-    bytes per entry); read it as UINT32 and the promoted number still lands in the right first two
-    bytes, which is how that bug hid for as long as it did.
+    the other target stays one switch away. BootOrder is an array of **UINT16**; read it as UINT32 and
+    the promoted number still lands in the right first two bytes.
   - OVMF **deletes the CD's entry when the VM boots without a CD** and reuses its number for a PXE
     entry, so after a `run-disk` there is nothing to promote. `boot-target.sh iso` then *blanks* the
     order (every slot set to `ffff`) — no entry is retired, OVMF finds nothing listed and boots the
@@ -129,8 +128,8 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
   - Dropping `BootOrder` by itself does not boot the CD: the order OVMF rebuilds puts a persisted OS
     entry ahead of it.
   - OVMF keeps `BootCurrent` boot-services-only, so it never reaches `OVMF_VARS.fd` (measured: the
-    name is not in the file). A run confirms its target from inside the guest — the live session has
-    `/version` and `/shared` and an enabled sshd, the installed test system has neither.
+    name is not in the file). A run confirms its target from inside the guest: the live session has a
+    9p-mounted `/shared` and an enabled sshd; the installed test system has neither.
 - `test-install.sh` resets `OVMF_VARS.fd` on **auto** runs only (an install needs a clean boot order);
   **boot** runs preserve it, because `run-disk` and `snapshot-rollback` follow the entries an install
   wrote — and ask `boot-target.sh iso` for the CD entry, so a preserved order cannot land the run on the
@@ -166,20 +165,19 @@ screenshotted), `SERIAL`, `BOOT_DISK=1` (boot the installed disk, no `-cdrom` �
 Beyond the layout checks (fstab UUIDs, no pinned `subvol=`, rEFInd entry + kernel in the
 per-install ESP dir, packages, user, hostname) it also proves the **package repository**
 setup: the `[aelum]` block in the installed `pacman.conf` (section + `SigLevel` + `Server`
-lines, and that the stock file was appended to, not rewritten), the release public key at
+lines, appended to the stock file, not rewritten), the release public key at
 `/usr/share/aelum/keyring/aelum-release.gpg` (carried by an isocopy job), and that the key
-is in the target's pacman keyring **valid** — a copy of the target's whole `gnupg` dir read
-with `gpg --no-autostart` (pacman 7.1 + gnupg 2.5 use the classic `pubring.gpg`; the trust
-lives in the target's own trustdb). `pub:f:` — signed by the Pacman Keyring Master Key —
-is what `--lsign-key` produces and what pacman requires before it accepts a signature.
-It also proves the target keeps **no sync database for a repository its pacman.conf does not
-name**: `pacstrap -K` resolves everything through the live session's `[aelum-offline]` and
-pacman writes that database under the `--root` it was given, and a stale `.db` in the sync
-directory is invisible to pacman but not to anything that reads the directory — the package
-manager showed a second copy of every package in it. Same checks on ext4 and btrfs — the
-repository is not snapshot machinery. The publisher itself is tested on the host:
-`repo/fake-repo.sh` (offline fixture) and, once published, real-pacman `-Sy`/`-Sp`/`-Sw`
-against `cdn.aelum.dev/repo/…` (see `repo/REPO.md`).
+is in the target's pacman keyring **valid** — `pub:f:`, what `--lsign-key` produces (signed
+by the Pacman Keyring Master Key, the precondition for pacman accepting a signature), read
+from a copy of the target's whole `gnupg` dir with `gpg --no-autostart` (pacman 7.1 + gnupg
+2.5 use the classic `pubring.gpg`; the trust lives in the target's own trustdb). It also
+proves the target keeps **no sync database for a repository its pacman.conf does not name**:
+`pacstrap -K` writes the live session's `[aelum-offline]` DB under its `--root`, and a stale
+`.db` there is invisible to pacman but not to anything reading the directory — the package
+manager showed every package twice. Same checks on ext4 and btrfs — the repository is not
+snapshot machinery. The publisher itself is tested on the host: `repo/fake-repo.sh` (offline
+fixture) and, once published, real-pacman `-Sy`/`-Sp`/`-Sw` against `cdn.aelum.dev/repo/…`
+(see `repo/REPO.md`).
 
 It runs **inside the guest** and never calls the installer — it re-opens LUKS, mounts the installed
 root read-only and asserts the on-disk result: root filesystem type; fstab mounting `/`, the ESP at
@@ -193,18 +191,16 @@ is checked to have **none** of that. It also proves the **input method** wiring:
 packages on every install, the session unit with its `/usr/bin/fcitx5` gate, the seeded wants link,
 the `hl.env` IM-module lines in the seeded `hyprland.lua`, the engine addons the `LANGUAGE=` asked
 for — and, for a keyboard-layout language or `INPUT_METHOD=none`, that no engine addon was pulled in.
-The **session input method list** is held against the disk too: `verify-installed.sh` mirrors the
-installer's two tables (`xkb_layout_for`/`ime_engines_for` in the script, `XkbLayoutByISO`/`imeTable`
-in Go — `TestXkbLayoutForRegion`/`TestSessionInputMethods` hold the tables themselves) and asserts
-`/etc/xdg/fcitx5/profile` names exactly English-then-the-local-one for the run's language+location,
-with `DefaultIM` on the local entry and `Default Layout=us`; that `/etc/xdg/fcitx5/config` puts the
-switch on `Alt+Shift_L`/`Alt+Shift_R`; and that the seeded session carries no `kb_options` (the key
-belongs to the framework, not the compositor).
-It also asserts the seeded session state hides the menu entries Aelum has no use for (the launcher
-lists packaged entries whatever their `NoDisplay`; `hiddenApps` is the filter for those, and it carries
-`foot-server` and `footclient` beside the fcitx5-configtool entries and `mpv` — see
-live-iso/AGENTS.md).
-`VERIFY=0` skips it.
+The **session input method list** is held against the disk too: the script mirrors the installer's two
+tables (`xkb_layout_for`/`ime_engines_for`; in Go `XkbLayoutByISO`/`imeTable`, pinned by
+`TestXkbLayoutForRegion`/`TestSessionInputMethods`) and asserts `/etc/xdg/fcitx5/profile` names exactly
+English-then-the-local-one for the run's language+location, with `DefaultIM` on the local entry and
+`Default Layout=us`; that `/etc/xdg/fcitx5/config` puts the switch on `Alt+Shift_L`/`Alt+Shift_R`; and
+that the seeded session carries no `kb_options` (the key belongs to the framework, not the
+compositor). The seeded session state must also hide the menu entries Aelum has no use for — the
+launcher lists packaged entries whatever their `NoDisplay`, so `hiddenApps` is the filter, and it
+carries `foot-server` and `footclient` beside the fcitx5-configtool entries and `mpv` (see
+live-iso/AGENTS.md). `VERIFY=0` skips all of it.
 
 ## Snapshot menu tests
 
