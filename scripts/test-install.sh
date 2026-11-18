@@ -48,9 +48,11 @@
 #               freshly built installer from /shared. QEMU is detached and
 #               survives this script exiting.
 #
-#   SHARED_INSTALLER=1 (auto mode) mount /shared and drive the auto install with
-#               the freshly built installer from /shared instead of the CLI
-#               baked into the ISO.
+#   SHARED_INSTALLER=1 (auto mode) drive the auto install with the freshly built
+#               installer from /shared instead of the CLI baked into the ISO.
+#               (/shared is mounted in every mode either way: the live session's
+#               sshd is gated on it — see live-iso/airootfs/etc/systemd/system/
+#               sshd.service.d/aelum-live-ssh.conf.)
 #
 # Requirements: qemu-system-x86_64, sshpass, ssh.
 #   KVM is optional: without /dev/kvm, set QEMU_QVM=0.
@@ -232,17 +234,20 @@ QEMU_ARGS=(
 )
 
 # Expose the host shared dir to the guest via a 9p virtfs mount (mirrors
-# run.sh). The live ISO's shared-mount service then mounts it at /shared on
-# boot, so the freshly built installer can be launched from there. Mounted in
-# boot mode always, and in auto mode when SHARED_INSTALLER=1 so the test can
-# drive the install from /shared instead of the baked-in CLI.
-if [ "$MODE" = "boot" ] || [ "$SHARED_INSTALLER" = "1" ]; then
-    # A fresh checkout has no shared/ (it holds artifacts only), and QEMU cannot
-    # export a directory that is absent.
-    mkdir -p "$SHARED_DIR" 2>/dev/null
-    [ -d "$SHARED_DIR" ] || fail "SHARED_DIR not found and could not be created: $SHARED_DIR"
-    QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
-fi
+# run-iso.sh). The live ISO's shared-mount service then mounts it at /shared on
+# boot, so the freshly built installer can be launched from there.
+#
+# It is now also how the live session knows it is being driven: sshd.service is
+# gated on /shared being a mount point
+# (live-iso/airootfs/etc/systemd/system/sshd.service.d/aelum-live-ssh.conf), so a
+# boot without the share has no SSH server — and this harness needs SSH in every
+# mode. Hence the mount is unconditional; SHARED_INSTALLER=1 still decides whether
+# the auto install is *driven* from /shared or from the CLI baked into the image.
+# A fresh checkout has no shared/ (it holds artifacts only), and QEMU cannot
+# export a directory that is absent.
+mkdir -p "$SHARED_DIR" 2>/dev/null
+[ -d "$SHARED_DIR" ] || fail "SHARED_DIR not found and could not be created: $SHARED_DIR"
+QEMU_ARGS+=(-virtfs local,path="$SHARED_DIR",mount_tag=shared,security_model=mapped,id=hostshared)
 
 if [ "$QEMU_QVM" = "1" ] && [ -e /dev/kvm ]; then
     QEMU_ARGS=(-enable-kvm -cpu host "${QEMU_ARGS[@]}")

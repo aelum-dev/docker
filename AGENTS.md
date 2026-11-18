@@ -144,6 +144,13 @@ Knobs: `XRES`/`YRES`, `UI=sdl|gtk`, `FULLSCREEN` (GTK only), `GL=0` (plain VGA),
   a freshly recreated disk, run `verify-installed.sh`, stop QEMU. `MODE=boot`: leave the VM running
   with `/shared` mounted and the disk untouched — that's where a freshly built CLI from
   `installer/build/bin/` gets tested without rebuilding the ISO (`SHARED_INSTALLER=1`).
+- **Every QEMU boot exports the 9p share now, and that is what makes the guest's SSH come up.** The
+  live profile gates `sshd.service` on `/shared` being a mount point
+  (`live-iso/…/sshd.service.d/aelum-live-ssh.conf`) so an empty-password root login never listens on
+  the network of someone who booted the image for real; `test-install.sh` used to pass `-virtfs` only
+  in boot mode / with `SHARED_INSTALLER=1` and now passes it always (`run-iso.sh` always did).
+  `SHARED_INSTALLER=1` still decides only *which* CLI the auto install runs. If a cell dies at
+  "sshd did not become available", check the `-virtfs` argument before suspecting the ISO.
 - Knobs: `MODE` `USERNAME` `USER_PASS` `ROOT_PASS` `LUKS_PASS` `SSH_PORT` `DISK_PATH` `FILESYSTEM`
   `LUKS` `LVM` `MANUAL` `VERIFY` `ISO` `SHARED_DIR` `QEMU_QVM` `QEMU_EXTRA` `GPU_DRIVER`
   `LANGUAGE` `REGION` `INPUT_METHOD`. `LANGUAGE=zh_CN` (or `ja_JP`, `ko_KR`, `vi_VN`, `zh_TW`) installs as
@@ -178,6 +185,22 @@ manager showed every package twice. Same checks on ext4 and btrfs — the reposi
 snapshot machinery. The publisher itself is tested on the host: `repo/fake-repo.sh` (offline
 fixture) and, once published, real-pacman `-Sy`/`-Sp`/`-Sw` against `cdn.aelum.dev/repo/…`
 (see `repo/REPO.md`).
+
+It also proves the **day-one firewall** (its own `section "firewall"`): `firewalld` +
+`firewall-config` installed, `systemctl --root="$MNT" is-enabled firewalld`, the GUI's desktop
+entry present so a port is openable without a terminal, the default zone read out of the target's
+`/etc/firewalld/firewalld.conf` with `trusted` refused (the installer never writes that file, so
+the value is checked rather than trusted), and that **no SSH server is enabled** on the installed
+system — `openssh` is a dependency, so the day-one state is "nothing listens", and the check runs
+before the `ENABLE_SSHD=1` fixture at the very end of the script, which is the only thing that ever
+turns it on (on the throwaway test disk, for `test-snapshot-rollback.sh`).
+
+One dependency worth naming: `test-snapshot-rollback.sh` reaches that booted install over SSH, and
+the install now runs the firewall — it works because Arch's packaged `public` zone accepts `ssh`
+(measured from `usr/lib/firewalld/zones/public.xml`, and asserted by a check in the firewall
+section). If a firewalld update ever drops that allowance, the check fails with a name instead of
+the rollback test timing out on SSH, and the fix belongs in the `ENABLE_SSHD` fixture
+(`firewall-offline-cmd --zone=public --add-service=ssh`, which needs no running daemon).
 
 It runs **inside the guest** and never calls the installer — it re-opens LUKS, mounts the installed
 root read-only and asserts the on-disk result: root filesystem type; fstab mounting `/`, the ESP at

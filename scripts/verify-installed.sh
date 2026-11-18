@@ -318,6 +318,64 @@ check "the resolver link points at NetworkManager's runtime resolv.conf" \
 # an AUR package without a setup step. Without it the AUR page says so and refuses.
 check "the AUR build tools are installed (base-devel)" pkg_installed base-devel
 
+# ── Firewall ──────────────────────────────────────────────────────────────────
+# A desktop is carried onto networks nobody owns, so the day-one posture is an
+# inbound policy: firewalld ships on every install (installer
+# installbase.BasePackages) and its unit is enabled by configure.EnableServices as
+# a *required* service. What this proves is the part a person cannot see — a machine
+# with no filter behaves exactly like a machine with one until somebody tries the
+# ports — and the GUI the desktop's answer to a firewall question goes through
+# (firewall-config, "Firewall" in the launcher).
+section "firewall"
+for p in firewalld firewall-config; do
+    check "$p is installed" pkg_installed "$p"
+done
+check "firewalld is enabled (the posture is in place before anyone logs in)" \
+    systemctl --root="$MNT" is-enabled firewalld
+check "the firewall's configuration GUI is in the menu" \
+    test -f "$MNT/usr/share/applications/firewall-config.desktop"
+
+# The zone a network the machine has never seen belongs to. NetworkManager leaves
+# connections unzoned, so firewalld's DefaultZone answers for every network a laptop
+# joins until somebody says otherwise per-connection. The installer deliberately
+# does not write that file — it is in the package's backup list, so a line added
+# here turns into a merge prompt on the next firewalld upgrade and a pinned value
+# would outlive a change of upstream default — which is exactly why the value is
+# read rather than trusted. Only `trusted` is refused: it is the zone that accepts
+# everything, so an install pointing at it has the package and none of the policy.
+firewalld_default_zone() {
+    sed -nE 's/^[[:space:]]*DefaultZone[[:space:]]*=[[:space:]]*([[:alnum:]_-]+).*/\1/p' "$1" | tail -1
+}
+fw_zone="$(firewalld_default_zone "$MNT/etc/firewalld/firewalld.conf")"
+# No active key means firewalld's own default, which is the packaged answer; the
+# comments in that file name it, and a config that commented the key out has not
+# switched filtering off.
+[ -n "$fw_zone" ] || fw_zone="public (firewalld's own default: no active DefaultZone key)"
+echo "  default zone: $fw_zone"
+check "new networks are not put in the trusted zone, which filters nothing" \
+    bash -c 'test "$1" != trusted' _ "$fw_zone"
+
+# Nothing is listening, and that is the point: openssh is on the disk as a
+# dependency of the desktop set, and sshd would answer on any network the machine
+# joins the moment anything enabled it. The installer never enables it — the live
+# session's own sshd is a harness channel and is gated separately
+# (live-iso/airootfs/etc/systemd/system/sshd.service.d/aelum-live-ssh.conf). The
+# test fixture that needs SSH on the throwaway disk is ENABLE_SSHD, and it runs at
+# the very end of this script, after this check.
+check "no SSH server is enabled (nothing answers before it is asked to)" \
+    bash -c '! test -e "$1/etc/systemd/system/multi-user.target.wants/sshd.service" &&
+              ! test -e "$1/etc/systemd/system/sockets.target.wants/sshd.socket"' _ "$MNT"
+
+# The allowance the packaged `public` zone carries for SSH is the reason the harness
+# can still reach an *installed* test system over SSH once the firewall is up
+# (test-snapshot-rollback.sh sshes into the booted install). It is a property of
+# firewalld's packaging, not of this repo, so it is asserted rather than assumed: if
+# a future firewalld drops it, this says so here instead of the rollback test dying
+# minutes later on an SSH timeout, and the fix at that point is the ENABLE_SSHD
+# fixture below calling `firewall-offline-cmd --zone=public --add-service=ssh`.
+check "the packaged public zone accepts ssh (what the install-side SSH tests rely on)" \
+    grep -q 'service name="ssh"' "$MNT/usr/lib/firewalld/zones/public.xml"
+
 # ── Package repository ────────────────────────────────────────────────────────
 # The installer enables the [aelum] repository and trusts its signing key
 # (installer configure/pacman_repo.go; constants in shared/config.go), so a
@@ -975,6 +1033,11 @@ if [ "$FILESYSTEM" = btrfs ]; then
         test -e "$factory/etc/systemd/system/display-manager.service"
     check "the factory snapshot has NetworkManager enabled" \
         test -e "$factory/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
+    # Same rule, the other reason the enable step cannot run after the snapshot: the
+    # state a broken system is restored to must also be a filtered one, or rolling
+    # back turns the machine into the thing the rollback was meant to escape.
+    check "the factory snapshot has the firewall enabled" \
+        test -e "$factory/etc/systemd/system/multi-user.target.wants/firewalld.service"
     # The same ordering, one step further: a snapshot boots the unit files the
     # snapshot contains, so anything a snapshot boot needs has to be inside it.
     check "the factory snapshot can rebuild its own boot menu" \
