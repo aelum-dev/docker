@@ -1052,19 +1052,28 @@ if [ "$FILESYSTEM" = btrfs ]; then
     # runs after it is simply absent from it: measured on a real install, the
     # factory snapshot had no display-manager.service and no NetworkManager, and
     # booting it came up at a text login instead of the greeter.
+    #
+    # "Enabled in the snapshot" means the wants/alias symlink is inside it, and
+    # these checks test the link (`-L`) and never its target (`-e`): systemctl
+    # writes those links with an absolute target (/usr/lib/systemd/system/…), and
+    # `test -e` resolves an absolute path against the live session's root, not the
+    # mounted install. Measured: the firewalld check below FAILed on an install that
+    # had in fact enabled it (systemctl --root says so in the firewall section) —
+    # the live ISO ships no firewalld, so its link read as dangling from here. The
+    # unit resolving *inside the install* is a different check's job.
     factory_info="$(grep -l 'after installation' "$MNT/.snapshots"/[0-9]*/info.xml 2>/dev/null | head -1)"
     factory=""
     [ -n "$factory_info" ] && factory="$(dirname "$factory_info")/snapshot"
     check "the factory snapshot is a tree on disk" test -d "$factory"
     check "the factory snapshot boots the greeter" \
-        test -e "$factory/etc/systemd/system/display-manager.service"
+        test -L "$factory/etc/systemd/system/display-manager.service"
     check "the factory snapshot has NetworkManager enabled" \
-        test -e "$factory/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
+        test -L "$factory/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
     # Same rule, the other reason the enable step cannot run after the snapshot: the
     # state a broken system is restored to must also be a filtered one, or rolling
     # back turns the machine into the thing the rollback was meant to escape.
     check "the factory snapshot has the firewall enabled" \
-        test -e "$factory/etc/systemd/system/multi-user.target.wants/firewalld.service"
+        test -L "$factory/etc/systemd/system/multi-user.target.wants/firewalld.service"
     # The same ordering, one step further: a snapshot boots the unit files the
     # snapshot contains, so anything a snapshot boot needs has to be inside it.
     check "the factory snapshot can rebuild its own boot menu" \
