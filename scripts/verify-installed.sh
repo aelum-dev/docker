@@ -386,6 +386,23 @@ check "no SSH server is enabled (nothing answers before it is asked to)" \
 check "the packaged public zone accepts ssh (what the install-side SSH tests rely on)" \
     grep -q 'service name="ssh"' "$MNT/usr/lib/firewalld/zones/public.xml"
 
+# ── VPN ───────────────────────────────────────────────────────────────────────
+# Dux Shell's VPN toggle — bar widget, control-center tile, Settings → Network →
+# VPN — is a NetworkManager client: it lists profiles, connects and answers auth
+# prompts for exactly the connection types whose plugins NM can register, so the
+# protocols an install can speak are the plugin packages (installer
+# installbase.BasePackages). This asserts the half nobody sees from the menu: a
+# VPN panel is only a promise until NetworkManager's plugin scan dir holds the
+# services that make a connection actually open. WireGuard needs no plugin — it
+# is built into NetworkManager and the kernel — its tools package rides along
+# because that is what provider setup docs and `wg show` debugging are written in.
+section "vpn"
+for p in networkmanager-vpn-plugin-openvpn networkmanager-vpn-plugin-openconnect wireguard-tools; do
+    check "$p is installed" pkg_installed "$p"
+done
+check "NetworkManager can activate a VPN (a VPN plugin is registered)" \
+    bash -c 'ls "$1"/usr/lib/NetworkManager/VPN/nm-*.name >/dev/null 2>&1' _ "$MNT"
+
 # ── Package repository ────────────────────────────────────────────────────────
 # The installer enables the [aelum] repository and trusts its signing key
 # (installer configure/pacman_repo.go; constants in shared/config.go), so a
