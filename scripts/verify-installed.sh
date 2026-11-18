@@ -318,6 +318,16 @@ check "the resolver link points at NetworkManager's runtime resolv.conf" \
 # an AUR package without a setup step. Without it the AUR page says so and refuses.
 check "the AUR build tools are installed (base-devel)" pkg_installed base-devel
 
+# The package installer's Firmware page is a D-Bus client of fwupd: without
+# the daemon the page can only offer to install it, and an offline install
+# would have to learn about that gap from the network. Arch's package ships
+# no preset, so the daemon starts on the bus name — on the first press of
+# that page — and nothing about shipping it wakes hardware or the LVFS.
+section "firmware"
+check "fwupd is installed (the Firmware page's daemon)" pkg_installed fwupd
+check "the firmware service is D-Bus activated (nothing runs until asked)" \
+    test -f "$MNT/usr/share/dbus-1/system-services/org.freedesktop.fwupd.service"
+
 # ── Firewall ──────────────────────────────────────────────────────────────────
 # A desktop is carried onto networks nobody owns, so the day-one posture is an
 # inbound policy: firewalld ships on every install (installer
